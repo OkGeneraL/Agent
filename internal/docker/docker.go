@@ -4,16 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"deployment-agent/internal/config"
-	"deployment-agent/internal/logging"
+	"superagent/internal/config"
+	"superagent/internal/logging"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -755,7 +752,11 @@ func (cm *ContainerManager) getContainerInfo(ctx context.Context, containerID st
 		Status:  containerJSON.State.Status,
 		State:   containerJSON.State.Status,
 		Labels:  containerJSON.Config.Labels,
-		CreatedAt: containerJSON.Created,
+	}
+
+	// Parse creation time
+	if createdTime, err := time.Parse(time.RFC3339, containerJSON.Created); err == nil {
+		info.CreatedAt = createdTime
 	}
 
 	// Parse start time

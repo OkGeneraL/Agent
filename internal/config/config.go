@@ -267,12 +267,12 @@ func Load(configPath string) (*Config, error) {
 	// Set default values
 	config := &Config{
 		Agent: AgentConfig{
-			WorkDir:          "/var/lib/deployment-agent",
-			DataDir:          "/var/lib/deployment-agent/data",
-			TempDir:          "/tmp/deployment-agent",
-			PIDFile:          "/var/run/deployment-agent.pid",
-			User:             "deployment-agent",
-			Group:            "deployment-agent",
+			WorkDir:          "/var/lib/superagent",
+			DataDir:          "/var/lib/superagent/data",
+			TempDir:          "/tmp/superagent",
+			PIDFile:          "/var/run/superagent.pid",
+			User:             "superagent",
+			Group:            "superagent",
 			MaxConcurrentOps: 5,
 			HeartbeatInterval: 30 * time.Second,
 		},
@@ -285,7 +285,7 @@ func Load(configPath string) (*Config, error) {
 		Docker: DockerConfig{
 			Host:            "unix:///var/run/docker.sock",
 			Version:         "1.41",
-			NetworkName:     "deployment-agent",
+			NetworkName:     "superagent",
 			LogDriver:       "json-file",
 			CleanupInterval: 1 * time.Hour,
 			CleanupRetention: 24 * time.Hour,
@@ -296,7 +296,7 @@ func Load(configPath string) (*Config, error) {
 		Git: GitConfig{
 			Timeout:        30 * time.Second,
 			MaxDepth:       50,
-			CacheDir:       "/var/cache/deployment-agent/git",
+			CacheDir:       "/var/cache/superagent/git",
 			CacheRetention: 24 * time.Hour,
 		},
 		Traefik: TraefikConfig{
@@ -308,7 +308,7 @@ func Load(configPath string) (*Config, error) {
 		Security: SecurityConfig{
 			TokenRotationInterval: 24 * time.Hour,
 			AuditLogEnabled:       true,
-			AuditLogPath:          "/var/log/deployment-agent/audit.log",
+			AuditLogPath:          "/var/log/superagent/audit.log",
 			AuditLogMaxSize:       100,
 			AuditLogMaxBackups:    10,
 			AuditLogMaxAge:        30,
@@ -329,12 +329,12 @@ func Load(configPath string) (*Config, error) {
 			Level:           "info",
 			Format:          "json",
 			Output:          "file",
-			LogFile:         "/var/log/deployment-agent/agent.log",
+			LogFile:         "/var/log/superagent/agent.log",
 			MaxSize:         100,
 			MaxBackups:      10,
 			MaxAge:          30,
 			Compress:        true,
-			AuditLogPath:    "/var/log/deployment-agent/audit.log",
+			AuditLogPath:    "/var/log/superagent/audit.log",
 			AuditLogMaxSize: 100,
 			AuditLogMaxBackups: 10,
 			AuditLogMaxAge:  30,
@@ -373,7 +373,7 @@ func Load(configPath string) (*Config, error) {
 	viper.SetConfigType("yaml")
 
 	// Set environment variable prefix
-	viper.SetEnvPrefix("DEPLOYMENT_AGENT")
+	viper.SetEnvPrefix("SUPERAGENT")
 	viper.AutomaticEnv()
 
 	// Read configuration file
@@ -421,12 +421,12 @@ agent:
   id: ""                    # Auto-generated if empty
   location: "default"       # Server location identifier
   server_id: ""            # Auto-generated if empty
-  work_dir: "/var/lib/deployment-agent"
-  data_dir: "/var/lib/deployment-agent/data"
-  temp_dir: "/tmp/deployment-agent"
-  pid_file: "/var/run/deployment-agent.pid"
-  user: "deployment-agent"
-  group: "deployment-agent"
+  work_dir: "/var/lib/superagent"
+data_dir: "/var/lib/superagent/data"
+temp_dir: "/tmp/superagent"
+pid_file: "/var/run/superagent.pid"
+user: "superagent"
+group: "superagent"
   max_concurrent_ops: 5
   heartbeat_interval: "30s"
 
@@ -445,7 +445,7 @@ backend:
 docker:
   host: "unix:///var/run/docker.sock"
   version: "1.41"
-  network_name: "deployment-agent"
+  network_name: "superagent"
   log_driver: "json-file"
   cleanup_interval: "1h"
   cleanup_retention: "24h"
@@ -457,7 +457,7 @@ git:
   ssh_key_path: ""         # Path to SSH private key
   timeout: "30s"
   max_depth: 50
-  cache_dir: "/var/cache/deployment-agent/git"
+  cache_dir: "/var/cache/superagent/git"
   cache_retention: "24h"
 
 traefik:
@@ -469,10 +469,10 @@ traefik:
   enable_tls: true
 
 security:
-  encryption_key_file: "/etc/deployment-agent/encryption.key"
+  encryption_key_file: "/etc/superagent/encryption.key"
   token_rotation_interval: "24h"
   audit_log_enabled: true
-  audit_log_path: "/var/log/deployment-agent/audit.log"
+  audit_log_path: "/var/log/superagent/audit.log"
   run_as_non_root: true
   read_only_root_fs: true
   no_new_privileges: true
@@ -490,7 +490,7 @@ logging:
   level: "info"
   format: "json"
   output: "file"
-  log_file: "/var/log/deployment-agent/agent.log"
+  log_file: "/var/log/superagent/agent.log"
   max_size: 100
   max_backups: 10
   max_age: 30
@@ -625,7 +625,7 @@ func loadEncryptionKey(keyFile, keyValue string) ([]byte, error) {
 
 // deriveKey derives an encryption key from a password
 func deriveKey(password string) []byte {
-	salt := []byte("deployment-agent-salt") // Use a proper salt in production
+	salt := []byte("superagent-salt") // Use a proper salt in production
 	return pbkdf2.Key([]byte(password), salt, 100000, 32, sha256.New)
 }
 
@@ -738,4 +738,87 @@ func (c *Config) Reload(configPath string) error {
 
 	*c = *newConfig
 	return nil
+}
+
+// LoadDefault loads configuration from default locations
+func LoadDefault() (*Config, error) {
+	configPath := ""
+	
+	// Check for config file in default locations
+	locations := []string{
+		"./.superagent.yaml",
+		"~/.superagent.yaml",
+		"/etc/superagent/config.yaml",
+	}
+	
+	for _, loc := range locations {
+		if _, err := os.Stat(loc); err == nil {
+			configPath = loc
+			break
+		}
+	}
+	
+	if configPath == "" {
+		// Create default config if none found
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get home directory: %w", err)
+		}
+		configPath = filepath.Join(homeDir, ".superagent.yaml")
+		if err := createDefaultConfig(configPath); err != nil {
+			return nil, fmt.Errorf("failed to create default config: %w", err)
+		}
+	}
+	
+	return Load(configPath)
+}
+
+// GetConfigFile returns the config file path
+func (c *Config) GetConfigFile() string {
+	return viper.ConfigFileUsed()
+}
+
+// GetLogLevel returns the log level
+func (c *Config) GetLogLevel() string {
+	return c.Logging.Level
+}
+
+// GetLogFormat returns the log format
+func (c *Config) GetLogFormat() string {
+	return c.Logging.Format
+}
+
+// GetLogOutput returns the log output
+func (c *Config) GetLogOutput() string {
+	return c.Logging.Output
+}
+
+// GetLogMaxSize returns the log max size
+func (c *Config) GetLogMaxSize() int {
+	return c.Logging.MaxSize
+}
+
+// GetLogMaxBackups returns the log max backups
+func (c *Config) GetLogMaxBackups() int {
+	return c.Logging.MaxBackups
+}
+
+// GetLogMaxAge returns the log max age
+func (c *Config) GetLogMaxAge() int {
+	return c.Logging.MaxAge
+}
+
+// GetLogCompress returns the log compress setting
+func (c *Config) GetLogCompress() bool {
+	return c.Logging.Compress
+}
+
+// GetAPIPort returns the API port
+func (c *Config) GetAPIPort() int {
+	return c.Monitoring.HealthCheckPort
+}
+
+// GetMetricsPort returns the metrics port
+func (c *Config) GetMetricsPort() int {
+	return c.Monitoring.MetricsPort
 }

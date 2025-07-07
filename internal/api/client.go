@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"deployment-agent/internal/config"
-	"deployment-agent/internal/logging"
+	"superagent/internal/config"
+	"superagent/internal/logging"
 
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
@@ -379,7 +379,7 @@ func (bc *BackendClient) sendRequest(ctx context.Context, method, path string, b
 	// Set headers
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+bc.apiToken)
-	req.Header.Set("User-Agent", "deployment-agent/1.0.0")
+	req.Header.Set("User-Agent", "superagent/1.0.0")
 	req.Header.Set("X-Agent-ID", bc.agentID)
 	req.Header.Set("X-Server-ID", bc.serverID)
 	req.Header.Set("X-Location", bc.location)

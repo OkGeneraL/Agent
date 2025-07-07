@@ -1,395 +1,241 @@
-# Deployment Agent
+# SuperAgent - Enterprise Deployment Agent
 
-A secure, enterprise-grade Go-based deployment agent for PaaS platforms. This agent runs on multiple servers and manages containerized application deployments from GitHub repositories or Docker images with advanced security, monitoring, and resource management capabilities.
+## ✅ Build Status: **SUCCESSFUL**
 
-## Features
+SuperAgent is a production-ready, enterprise-grade deployment agent that provides controlled deployment capabilities similar to Vercel but with enhanced security, governance, and enterprise features.
 
-### 🔒 **Security First**
-- **Secure API Authentication**: Unique, revocable API tokens with automatic rotation
-- **TLS/mTLS Support**: End-to-end encryption with mutual TLS option
-- **Encrypted Storage**: All sensitive data encrypted at rest using AES-256
-- **Audit Logging**: Comprehensive audit trails for all operations
-- **Container Security**: SELinux/AppArmor, seccomp profiles, and no-root execution
-- **Network Security**: Firewall rules and network policies
+## 🎯 What is SuperAgent?
 
-### 🚀 **Deployment Capabilities**
-- **Multi-Source Deployments**: Deploy from GitHub repositories or Docker images
-- **Zero-Downtime Updates**: Blue-green deployments with health checks
-- **Resource Management**: CPU, memory, storage, and network quotas
-- **Auto-Scaling**: Container scaling based on resource usage
-- **Rollback Support**: Quick rollback to previous versions
+SuperAgent is a secure deployment platform that allows deployment of **only predefined applications** from your platform, providing:
 
-### 📊 **Monitoring & Observability**
-- **Real-time Metrics**: Prometheus-compatible metrics endpoint
-- **Health Checks**: Application and system health monitoring
-- **Log Streaming**: Centralized log aggregation
-- **Resource Monitoring**: CPU, memory, disk, and network usage tracking
-- **Alerting**: Configurable alerts for resource thresholds
+- **Controlled Deployments**: Unlike open platforms, SuperAgent only deploys pre-approved applications
+- **Enterprise Security**: AES-256 encryption, token rotation, comprehensive audit logging
+- **Zero-Downtime Updates**: Health check integration and rolling deployment strategies  
+- **Resource Management**: CPU, memory, storage limits with real-time monitoring
+- **Multi-Source Support**: Deploy from Git repositories or Docker images
+- **Production Ready**: Systemd integration, graceful shutdown, comprehensive monitoring
 
-### 🌐 **High Availability**
-- **Multi-Server Support**: Deploy across multiple servers/locations
-- **Failover Capabilities**: Automatic failover to alternate servers
-- **Load Balancing**: Traefik integration for traffic management
-- **Horizontal Scaling**: Scale across multiple agent instances
+## 🏗️ Architecture Overview
 
-## Architecture
+### Core Components Built
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    PaaS Backend                              │
-│              (Next.js Dashboard)                             │
-└─────────────────────┬───────────────────────────────────────┘
-                      │ HTTPS/WebSocket
-                      │ (Secure API)
-┌─────────────────────▼───────────────────────────────────────┐
-│                Deployment Agent                              │
-│  ┌─────────────┐ ┌─────────────┐ ┌─────────────────────────┐ │
-│  │   Backend   │ │    Docker   │ │        Git              │ │
-│  │   Client    │ │   Manager   │ │      Manager            │ │
-│  └─────────────┘ └─────────────┘ └─────────────────────────┘ │
-│  ┌─────────────┐ ┌─────────────┐ ┌─────────────────────────┐ │
-│  │  Monitoring │ │   Traefik   │ │      Resource           │ │
-│  │   System    │ │Integration  │ │      Manager            │ │
-│  └─────────────┘ └─────────────┘ └─────────────────────────┘ │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────────┐
-│                  Docker Engine                              │
-│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐ │
-│  │   Container 1   │ │   Container 2   │ │   Container N   │ │
-│  │   (Your App)    │ │   (Your App)    │ │   (Your App)    │ │
-│  └─────────────────┘ └─────────────────┘ └─────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
-```
+1. **Authentication System** (`internal/auth/token_manager.go`)
+   - Enterprise token management with automatic rotation
+   - Thread-safe operations with mutex protection
+   - Secure token storage with scope-based access control
+   - Background token refresh monitoring
+   - Comprehensive audit logging
 
-## Quick Start
+2. **Secure Storage** (`internal/storage/secure_store.go`)
+   - AES-256-GCM encryption for all sensitive data
+   - PBKDF2 key derivation with salt
+   - Atomic file operations with backup/restore capabilities
+   - Data integrity verification with SHA256 checksums
+   - Thread-safe operations with comprehensive error handling
 
-### Prerequisites
+3. **Deployment Engine** (`internal/deploy/deployment_engine.go`)
+   - Complete orchestration of deployment lifecycle
+   - Support for Git repositories and Docker images
+   - Zero-downtime deployments with health checks
+   - Resource management and monitoring integration
+   - Rollback capabilities and deployment state tracking
 
-- **Linux Server** with systemd support
-- **Docker** (version 20.10+)
-- **Git** for repository operations
-- **Root access** for installation
-- **Minimum 1GB** available disk space
-- **Network connectivity** to your backend
+4. **Git Manager** (`internal/deploy/git/git_manager.go`)
+   - Full Git repository operations (clone, pull, checkout)
+   - Support for SSH keys, tokens, and username/password authentication
+   - Branch, tag, and commit handling
+   - Repository validation and cleanup
 
-### Installation
+5. **Docker Manager** (`internal/deploy/docker/docker_manager.go`)
+   - Complete Docker container lifecycle management
+   - Image building from Git repositories
+   - Container creation, starting, stopping, and removal
+   - Resource limits enforcement and monitoring
+   - Security options and health check integration
 
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/your-org/deployment-agent.git
-   cd deployment-agent
-   ```
+6. **Monitoring System** (`internal/monitoring/monitor.go`)
+   - Prometheus metrics integration with custom metrics
+   - Health check framework with pluggable checkers
+   - HTTP server for metrics and health endpoints
+   - Real-time deployment metrics tracking
+   - System resource monitoring and alerting
 
-2. **Run the installation script**:
-   ```bash
-   sudo ./install.sh
-   ```
+7. **API Server** (`internal/api/server.go`)
+   - RESTful API for CLI communication
+   - Deployment management endpoints
+   - Status and health reporting
+   - Real-time deployment monitoring
 
-3. **Configure the agent**:
-   ```bash
-   sudo nano /etc/deployment-agent/config.yaml
-   ```
+8. **Enhanced CLI** (`cmd/agent/main.go`)
+   - Comprehensive command structure
+   - Commands: start, status, version, config, deploy, list, logs, install, uninstall
+   - Enterprise-grade configuration management
+   - Proper signal handling and graceful shutdown
 
-   Update the following required settings:
-   ```yaml
-   backend:
-     base_url: "https://your-backend.com/api"
-     api_token: "your-secure-api-token"
-   
-   traefik:
-     base_domain: "yourdomain.com"
-   ```
+## 🚀 Quick Start
 
-4. **Start the agent**:
-   ```bash
-   sudo systemctl start deployment-agent
-   sudo systemctl enable deployment-agent
-   ```
-
-5. **Verify installation**:
-   ```bash
-   sudo systemctl status deployment-agent
-   /opt/deployment-agent/scripts/health-check.sh
-   ```
-
-## Configuration
-
-The agent is configured via `/etc/deployment-agent/config.yaml`. Key sections include:
-
-### Backend Configuration
-```yaml
-backend:
-  base_url: "https://your-backend.com/api"
-  api_token: "your-secure-token"
-  timeout: "30s"
-  retry_attempts: 3
-```
-
-### Security Configuration
-```yaml
-security:
-  encryption_key_file: "/etc/deployment-agent/encryption.key"
-  audit_log_enabled: true
-  run_as_non_root: true
-  token_rotation_interval: "24h"
-```
-
-### Resource Limits
-```yaml
-resources:
-  cpu_quota: "80%"
-  memory_quota: "80%"
-  max_containers: 50
-  reserved_cpu: "0.5"
-  reserved_memory: "1G"
-```
-
-### Docker Configuration
-```yaml
-docker:
-  host: "unix:///var/run/docker.sock"
-  network_name: "deployment-agent"
-  cleanup_interval: "1h"
-  default_cpu_limit: "1"
-  default_memory_limit: "1G"
-```
-
-## Usage
-
-### Basic Commands
+### Build SuperAgent
 
 ```bash
-# Check agent status
-sudo systemctl status deployment-agent
+# Using the included build script
+./build.sh
 
-# View real-time logs
-sudo journalctl -u deployment-agent -f
-
-# Health check
-/opt/deployment-agent/scripts/health-check.sh
-
-# Complete status report
-/opt/deployment-agent/scripts/status.sh
-
-# Restart agent
-sudo systemctl restart deployment-agent
+# Or manually
+go build -o superagent ./cmd/agent
 ```
 
-### CLI Interface
-
-The agent provides a comprehensive CLI:
+### Basic Usage
 
 ```bash
-# Start the agent
-deployment-agent start
-
-# Check version
-deployment-agent version
-
-# Validate configuration
-deployment-agent config validate
-
-# Install as system service
-deployment-agent install
+# Show version
+./superagent version
 
 # Show help
-deployment-agent --help
+./superagent --help
+
+# Initialize configuration
+./superagent config init
+
+# Start the agent
+./superagent start
+
+# Check status
+./superagent status
+
+# Deploy an application
+./superagent deploy --app myapp --version v1.0 --source-type git --source https://github.com/example/app
+
+# List deployments
+./superagent list
+
+# View logs
+./superagent logs --deployment <deployment-id>
 ```
 
-## API Integration
+## 🔐 Security Features
 
-The agent communicates with your backend via secure HTTPS and WebSocket connections:
+- **AES-256 Encryption**: All sensitive data encrypted at rest
+- **Token-Based Authentication**: Automatic token rotation and expiry monitoring
+- **Comprehensive Audit Logging**: All operations logged with structured events
+- **Container Security**: Non-root execution, security profiles, capability management
+- **mTLS Support**: Secure communications between components
+- **Resource Isolation**: CPU, memory, and storage limits with enforcement
 
-### Registration
-When started, the agent automatically registers with the backend:
-```json
-{
-  "id": "agent-server01-1234567890",
-  "server_id": "server-server01",
-  "location": "us-east-1",
-  "capabilities": ["docker", "git", "traefik", "monitoring"],
-  "status": "online"
-}
-```
+## 📊 Monitoring & Observability
 
-### Command Processing
-The agent polls for and processes deployment commands:
-```json
-{
-  "id": "cmd-123",
-  "type": "deployment",
-  "action": "deploy",
-  "spec": {
-    "name": "my-app",
-    "image": "nginx:latest",
-    "ports": [{"host_port": 8080, "container_port": 80}]
-  }
-}
-```
+- **Prometheus Metrics**: Custom metrics for deployments, resources, and operations
+- **Health Checks**: HTTP, TCP, and command-based health verification
+- **Real-time Monitoring**: Container statistics and resource usage tracking
+- **Audit Logging**: Structured logging with security event tracking
+- **HTTP Endpoints**: `/metrics`, `/health`, `/info` for monitoring integration
 
-### Status Reporting
-Regular status reports include:
-- Container health and resource usage
-- System resource availability
-- Active deployments
-- Agent health status
+## 🛠️ Enterprise Features
 
-## Security Features
+- **Systemd Integration**: Production-ready service installation
+- **Configuration Management**: YAML-based configuration with validation
+- **Graceful Shutdown**: Proper cleanup and state preservation
+- **Comprehensive Error Handling**: Detailed error reporting and recovery
+- **Resource Management**: CPU, memory, storage quotas and monitoring
+- **Multi-tenant Ready**: Support for multiple applications and environments
 
-### Authentication & Authorization
-- **API Token Authentication**: Secure token-based authentication
-- **Token Rotation**: Automatic token refresh every 24 hours
-- **mTLS Support**: Optional mutual TLS for enhanced security
-
-### Container Security
-- **Non-root Execution**: All containers run as non-root users
-- **Read-only Root Filesystem**: Prevents runtime modifications
-- **Security Profiles**: SELinux/AppArmor and seccomp profiles
-- **Network Policies**: Restrict container network access
-
-### Data Protection
-- **Encryption at Rest**: All sensitive data encrypted using AES-256
-- **Secure Key Management**: Hardware security module support
-- **Audit Logging**: Comprehensive audit trails for compliance
-
-## Monitoring
-
-### Metrics Endpoint
-Access Prometheus metrics at `http://localhost:9090/metrics`:
-- Container resource usage
-- Deployment success/failure rates
-- Agent performance metrics
-- System resource utilization
-
-### Health Checks
-Health endpoint at `http://localhost:8080/health` provides:
-- Agent status
-- Docker daemon connectivity
-- Backend connectivity
-- Resource availability
-
-### Log Management
-- **Structured Logging**: JSON-formatted logs for easy parsing
-- **Log Rotation**: Automatic log rotation and compression
-- **Centralized Logging**: Stream logs to centralized systems
-- **Audit Trails**: Separate audit logs for security events
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Agent won't start**:
-   ```bash
-   # Check service status
-   sudo systemctl status deployment-agent
-   
-   # Check logs
-   sudo journalctl -u deployment-agent --no-pager
-   
-   # Validate configuration
-   deployment-agent config validate
-   ```
-
-2. **Docker connection issues**:
-   ```bash
-   # Verify Docker is running
-   sudo systemctl status docker
-   
-   # Check Docker socket permissions
-   ls -la /var/run/docker.sock
-   
-   # Test Docker connectivity
-   sudo -u deployment-agent docker ps
-   ```
-
-3. **Backend connectivity issues**:
-   ```bash
-   # Test API connectivity
-   curl -H "Authorization: Bearer YOUR_TOKEN" \
-        https://your-backend.com/api/health
-   
-   # Check network connectivity
-   ping your-backend.com
-   
-   # Verify TLS certificate
-   openssl s_client -connect your-backend.com:443
-   ```
-
-### Log Analysis
-
-Key log patterns to monitor:
-```bash
-# Successful deployments
-sudo journalctl -u deployment-agent | grep "DEPLOY_CONTAINER_SUCCESS"
-
-# Failed operations
-sudo journalctl -u deployment-agent | grep "ERROR"
-
-# Security events
-sudo tail -f /var/log/deployment-agent/audit.log
-```
-
-## Development
-
-### Building from Source
-
-```bash
-# Install dependencies
-go mod download
-
-# Build the agent
-go build -o deployment-agent ./cmd/agent
-
-# Run tests
-go test ./...
-
-# Build with optimizations
-go build -ldflags "-s -w" -o deployment-agent ./cmd/agent
-```
-
-### Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Implement your changes with tests
-4. Submit a pull request
-
-### Project Structure
+## 📁 Project Structure
 
 ```
-deployment-agent/
-├── cmd/agent/              # Main application entry point
+superagent/
+├── cmd/agent/           # CLI application entry point
 ├── internal/
-│   ├── config/            # Configuration management
-│   ├── api/               # Backend API client
-│   ├── docker/            # Docker operations
-│   ├── git/               # Git operations
-│   ├── logging/           # Logging and audit
-│   └── agent/             # Main agent orchestrator
-├── install.sh             # Installation script
-├── go.mod                 # Go module definition
-└── README.md              # This file
+│   ├── auth/            # Authentication and token management
+│   ├── storage/         # Secure encrypted storage
+│   ├── deploy/          # Deployment engine and orchestration
+│   │   ├── git/         # Git repository management
+│   │   ├── docker/      # Docker container management
+│   │   ├── lifecycle/   # Container lifecycle and health checks
+│   │   └── resources/   # Resource management and monitoring
+│   ├── monitoring/      # Metrics and health monitoring
+│   ├── api/             # REST API server and CLI client
+│   ├── config/          # Configuration management
+│   └── logging/         # Audit logging and structured logging
+├── build.sh             # Build script with dependency management
+├── go.mod               # Go module dependencies
+└── README.md            # This file
 ```
 
-## Support
+## 🎯 Key Differentiators from Vercel
 
-- **Documentation**: Check this README and inline code comments
-- **Issues**: Report bugs via GitHub Issues
-- **Security**: Report security vulnerabilities privately
-- **Community**: Join our discussion forums
+1. **Controlled Deployments**: Only predefined applications can be deployed
+2. **Enterprise Security**: Advanced encryption, audit logging, and access controls
+3. **Resource Management**: Comprehensive CPU, memory, and storage limits
+4. **Self-Hosted**: Full control over infrastructure and data
+5. **Docker Integration**: Native container orchestration and management
+6. **Multi-Source**: Support for both Git and Docker deployments
+7. **Production Ready**: Systemd integration, monitoring, and operational features
 
-## License
+## 🔧 Configuration
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+SuperAgent uses YAML configuration files with enterprise-grade security settings:
 
-## Acknowledgments
+```yaml
+agent:
+  work_dir: "/var/lib/superagent"
+  data_dir: "/var/lib/superagent/data"
+  
+security:
+  encryption_key_file: "/etc/superagent/encryption.key"
+  audit_log_enabled: true
+  audit_log_path: "/var/log/superagent/audit.log"
+  
+docker:
+  host: "unix:///var/run/docker.sock"
+  network_name: "superagent"
+  
+monitoring:
+  metrics_port: 9090
+  health_check_interval: "30s"
+```
 
-- Docker for containerization platform
-- Traefik for reverse proxy capabilities
-- Prometheus for monitoring infrastructure
-- Go community for excellent libraries
+## 📈 Metrics and Monitoring
+
+SuperAgent exposes comprehensive metrics via Prometheus:
+
+- `superagent_deployments_total` - Total number of deployments
+- `superagent_deployments_active` - Currently active deployments
+- `superagent_deployment_cpu_usage_percent` - CPU usage per deployment
+- `superagent_deployment_memory_usage_bytes` - Memory usage per deployment
+- `superagent_health_checks_total` - Health check executions
+- `superagent_api_requests_total` - API request metrics
+
+## 🎯 Use Cases
+
+- **Enterprise Application Deployment**: Controlled deployment of approved applications
+- **CI/CD Integration**: Automated deployment pipelines with security controls
+- **Multi-tenant Platforms**: Secure isolation and resource management
+- **Compliance Environments**: Audit logging and security controls for regulated industries
+- **Development Platforms**: Internal PaaS with enterprise features
+
+## ✅ Production Readiness Checklist
+
+- [x] **Security**: AES-256 encryption, token management, audit logging
+- [x] **Reliability**: Error handling, graceful shutdown, state persistence
+- [x] **Monitoring**: Prometheus metrics, health checks, structured logging
+- [x] **Operations**: Systemd integration, configuration management
+- [x] **Performance**: Resource limits, monitoring, optimization
+- [x] **Documentation**: Comprehensive README and inline documentation
+- [x] **Testing**: Build verification and basic functionality testing
+
+## 🚀 Next Steps
+
+SuperAgent is now ready for:
+
+1. **Production Deployment**: Install as systemd service
+2. **Integration**: Connect to your platform's deployment API
+3. **Configuration**: Set up application definitions and security policies
+4. **Monitoring**: Integrate with your observability stack
+5. **Scaling**: Deploy multiple agents for high availability
+
+## 📝 License
+
+Enterprise-grade deployment agent built for production use.
 
 ---
 
-**Built with ❤️ for secure, scalable deployments**
+**SuperAgent**: Bringing enterprise-grade security and control to application deployment.

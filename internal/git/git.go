@@ -11,12 +11,11 @@ import (
 	"sync"
 	"time"
 
-	"deployment-agent/internal/config"
-	"deployment-agent/internal/logging"
+	"superagent/internal/config"
+	"superagent/internal/logging"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
@@ -500,8 +499,8 @@ func (gm *GitManager) getRepositoryInfo(repoPath string, opts *CloneOptions) (*R
 		return nil, fmt.Errorf("failed to get HEAD: %w", err)
 	}
 
-	// Get commit
-	commit, err := repo.CommitObject(head.Hash())
+// Get commit (not used but needed for validation)
+	_, err = repo.CommitObject(head.Hash())
 	if err != nil {
 		return nil, fmt.Errorf("failed to get commit: %w", err)
 	}

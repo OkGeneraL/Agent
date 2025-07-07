@@ -6,11 +6,14 @@ import (
 	"sync"
 	"time"
 
-	"deployment-agent/internal/api"
-	"deployment-agent/internal/config"
-	"deployment-agent/internal/docker"
-	"deployment-agent/internal/git"
-	"deployment-agent/internal/logging"
+	"superagent/internal/api"
+	"superagent/internal/config"
+	"superagent/internal/deploy"
+	"superagent/internal/docker"
+	"superagent/internal/git"
+	"superagent/internal/logging"
+	"superagent/internal/monitoring"
+	"superagent/internal/storage"
 
 	"github.com/sirupsen/logrus"
 )
@@ -21,8 +24,12 @@ type Agent struct {
 	auditLogger       *logging.AuditLogger
 	logStreamer       *logging.LogStreamer
 	backendClient     *api.BackendClient
+	apiServer         *api.APIServer
+	deploymentEngine  *deploy.DeploymentEngine
 	containerManager  *docker.ContainerManager
 	gitManager        *git.GitManager
+	store             *storage.SecureStore
+	monitor           *monitoring.Monitor
 	commandQueue      chan *api.DeploymentCommand
 	activeCommands    map[string]*CommandExecution
 	mu                sync.RWMutex
@@ -53,11 +60,29 @@ func New(cfg *config.Config, auditLogger *logging.AuditLogger) (*Agent, error) {
 		logStreamer = logging.NewLogStreamer(cfg.Monitoring.LogStreamingEndpoint, cfg.Backend.APIToken)
 	}
 
+	// Create secure storage
+	store, err := storage.NewSecureStore(cfg.Agent.DataDir, cfg.Security.EncryptionKey, auditLogger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create secure store: %w", err)
+	}
+
+	// Create monitoring
+	monitor := monitoring.NewMonitor(auditLogger, cfg.GetMetricsPort())
+
+	// Create deployment engine
+	deploymentEngine, err := deploy.NewDeploymentEngine(store, auditLogger, monitor)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create deployment engine: %w", err)
+	}
+
 	// Create backend client
 	backendClient, err := api.NewBackendClient(cfg, auditLogger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create backend client: %w", err)
 	}
+
+	// Create API server
+	apiServer := api.NewAPIServer(cfg, auditLogger, deploymentEngine)
 
 	// Create container manager
 	containerManager, err := docker.NewContainerManager(cfg, auditLogger, logStreamer)
@@ -79,8 +104,12 @@ func New(cfg *config.Config, auditLogger *logging.AuditLogger) (*Agent, error) {
 		auditLogger:      auditLogger,
 		logStreamer:      logStreamer,
 		backendClient:    backendClient,
+		apiServer:        apiServer,
+		deploymentEngine: deploymentEngine,
 		containerManager: containerManager,
 		gitManager:       gitManager,
+		store:            store,
+		monitor:          monitor,
 		commandQueue:     make(chan *api.DeploymentCommand, 100),
 		activeCommands:   make(map[string]*CommandExecution),
 		ctx:              ctx,
@@ -94,6 +123,21 @@ func New(cfg *config.Config, auditLogger *logging.AuditLogger) (*Agent, error) {
 // Start starts the deployment agent
 func (a *Agent) Start(ctx context.Context) error {
 	logrus.Info("Starting deployment agent")
+
+	// Start monitoring
+	if err := a.monitor.Start(); err != nil {
+		return fmt.Errorf("failed to start monitor: %w", err)
+	}
+
+	// Start deployment engine
+	if err := a.deploymentEngine.Start(); err != nil {
+		return fmt.Errorf("failed to start deployment engine: %w", err)
+	}
+
+	// Start API server
+	if err := a.apiServer.Start(ctx); err != nil {
+		return fmt.Errorf("failed to start API server: %w", err)
+	}
 
 	// Start backend client
 	if err := a.backendClient.Start(ctx); err != nil {
@@ -152,6 +196,24 @@ func (a *Agent) Shutdown(ctx context.Context) error {
 	}
 
 	// Close components
+	if a.apiServer != nil {
+		if err := a.apiServer.Stop(ctx); err != nil {
+			logrus.Errorf("Failed to stop API server: %v", err)
+		}
+	}
+
+	if a.deploymentEngine != nil {
+		if err := a.deploymentEngine.Stop(); err != nil {
+			logrus.Errorf("Failed to stop deployment engine: %v", err)
+		}
+	}
+
+	if a.monitor != nil {
+		if err := a.monitor.Stop(); err != nil {
+			logrus.Errorf("Failed to stop monitor: %v", err)
+		}
+	}
+
 	if a.containerManager != nil {
 		if err := a.containerManager.Close(); err != nil {
 			logrus.Errorf("Failed to close container manager: %v", err)
@@ -398,7 +460,9 @@ func (a *Agent) deployApplication(ctx context.Context, command *api.DeploymentCo
 		if err != nil {
 			return nil, fmt.Errorf("failed to clone and build repository: %w", err)
 		}
-		spec.Image = repoInfo.Image // Use built image
+		if imageRef, ok := repoInfo["image"].(string); ok {
+			spec.Image = imageRef // Use built image
+		}
 	}
 
 	// Deploy container
