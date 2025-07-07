@@ -1,0 +1,696 @@
+package paas
+
+import (
+	"context"
+	"fmt"
+	"net"
+	"regexp"
+	"strings"
+	"sync"
+	"time"
+
+	"superagent/internal/storage"
+	"superagent/internal/logging"
+
+	"github.com/sirupsen/logrus"
+)
+
+// DomainManager handles domain and SSL management for the PaaS platform
+type DomainManager struct {
+	store          *storage.SecureStore
+	auditLogger    *logging.AuditLogger
+	domains        map[string]*Domain
+	subdomains     map[string]*Subdomain
+	sslCerts       map[string]*SSLCertificate
+	traefikConfig  *TraefikConfig
+	baseDomain     string
+	dnsProvider    string
+	acmeEmail      string
+	mu             sync.RWMutex
+}
+
+// Domain represents a custom domain configuration
+type Domain struct {
+	ID              string                 `json:"id"`
+	Name            string                 `json:"name"`
+	CustomerID      string                 `json:"customer_id"`
+	DeploymentID    string                 `json:"deployment_id"`
+	Status          DomainStatus           `json:"status"`
+	Type            DomainType             `json:"type"`
+	DNSRecords      []DNSRecord            `json:"dns_records"`
+	SSLCertificate  *SSLCertificate        `json:"ssl_certificate,omitempty"`
+	Verification    DomainVerification     `json:"verification"`
+	TraefikRule     string                 `json:"traefik_rule"`
+	RedirectToHTTPS bool                   `json:"redirect_to_https"`
+	WWWRedirect     bool                   `json:"www_redirect"`
+	CDNEnabled      bool                   `json:"cdn_enabled"`
+	WAFEnabled      bool                   `json:"waf_enabled"`
+	CreatedAt       time.Time              `json:"created_at"`
+	UpdatedAt       time.Time              `json:"updated_at"`
+	ExpiresAt       *time.Time             `json:"expires_at,omitempty"`
+	Metadata        map[string]interface{} `json:"metadata"`
+}
+
+// Subdomain represents an auto-assigned subdomain
+type Subdomain struct {
+	ID           string                 `json:"id"`
+	Name         string                 `json:"name"`
+	FullDomain   string                 `json:"full_domain"`
+	CustomerID   string                 `json:"customer_id"`
+	DeploymentID string                 `json:"deployment_id"`
+	Status       DomainStatus           `json:"status"`
+	Region       string                 `json:"region"`
+	TraefikRule  string                 `json:"traefik_rule"`
+	CreatedAt    time.Time              `json:"created_at"`
+	UpdatedAt    time.Time              `json:"updated_at"`
+	Metadata     map[string]interface{} `json:"metadata"`
+}
+
+// SSLCertificate represents an SSL certificate
+type SSLCertificate struct {
+	ID              string                 `json:"id"`
+	Domain          string                 `json:"domain"`
+	AlternateNames  []string               `json:"alternate_names"`
+	Provider        string                 `json:"provider"` // letsencrypt, custom, cloudflare
+	Status          CertificateStatus      `json:"status"`
+	IssuedAt        time.Time              `json:"issued_at"`
+	ExpiresAt       time.Time              `json:"expires_at"`
+	RenewAt         time.Time              `json:"renew_at"`
+	CertificateData string                 `json:"certificate_data"`
+	PrivateKeyData  string                 `json:"private_key_data"`
+	Chain           []string               `json:"chain"`
+	AutoRenew       bool                   `json:"auto_renew"`
+	CreatedAt       time.Time              `json:"created_at"`
+	UpdatedAt       time.Time              `json:"updated_at"`
+	Metadata        map[string]interface{} `json:"metadata"`
+}
+
+// DomainStatus represents domain status
+type DomainStatus string
+
+const (
+	DomainStatusPending    DomainStatus = "pending"
+	DomainStatusActive     DomainStatus = "active"
+	DomainStatusVerifying  DomainStatus = "verifying"
+	DomainStatusFailed     DomainStatus = "failed"
+	DomainStatusSuspended  DomainStatus = "suspended"
+	DomainStatusExpired    DomainStatus = "expired"
+)
+
+// DomainType represents domain type
+type DomainType string
+
+const (
+	DomainTypeCustom    DomainType = "custom"
+	DomainTypeSubdomain DomainType = "subdomain"
+	DomainTypeWildcard  DomainType = "wildcard"
+)
+
+// CertificateStatus represents SSL certificate status
+type CertificateStatus string
+
+const (
+	CertStatusPending   CertificateStatus = "pending"
+	CertStatusValid     CertificateStatus = "valid"
+	CertStatusExpired   CertificateStatus = "expired"
+	CertStatusRevoked   CertificateStatus = "revoked"
+	CertStatusFailed    CertificateStatus = "failed"
+	CertStatusRenewing  CertificateStatus = "renewing"
+)
+
+// DNSRecord represents a DNS record
+type DNSRecord struct {
+	Type     string `json:"type"`     // A, CNAME, TXT, MX
+	Name     string `json:"name"`
+	Value    string `json:"value"`
+	TTL      int    `json:"ttl"`
+	Priority int    `json:"priority,omitempty"`
+	Required bool   `json:"required"`
+	Status   string `json:"status"`   // pending, verified, failed
+}
+
+// DomainVerification represents domain verification status
+type DomainVerification struct {
+	Method           string    `json:"method"` // dns, http, email
+	Status           string    `json:"status"`
+	Token            string    `json:"token,omitempty"`
+	Challenge        string    `json:"challenge,omitempty"`
+	VerifiedAt       *time.Time `json:"verified_at,omitempty"`
+	LastCheckedAt    time.Time  `json:"last_checked_at"`
+	RetryCount       int       `json:"retry_count"`
+	FailureReason    string    `json:"failure_reason,omitempty"`
+}
+
+// TraefikConfig represents Traefik configuration
+type TraefikConfig struct {
+	Enabled         bool                   `json:"enabled"`
+	ConfigPath      string                 `json:"config_path"`
+	CertResolver    string                 `json:"cert_resolver"`
+	APIEndpoint     string                 `json:"api_endpoint"`
+	Networks        []string               `json:"networks"`
+	DefaultHeaders  map[string]string      `json:"default_headers"`
+	Middlewares     []TraefikMiddleware    `json:"middlewares"`
+	Metadata        map[string]interface{} `json:"metadata"`
+}
+
+// TraefikMiddleware represents a Traefik middleware
+type TraefikMiddleware struct {
+	Name        string                 `json:"name"`
+	Type        string                 `json:"type"` // headers, auth, ratelimit, etc.
+	Config      map[string]interface{} `json:"config"`
+	Enabled     bool                   `json:"enabled"`
+}
+
+// CreateDomainRequest represents domain creation request
+type CreateDomainRequest struct {
+	Name            string                 `json:"name"`
+	CustomerID      string                 `json:"customer_id"`
+	DeploymentID    string                 `json:"deployment_id"`
+	Type            DomainType             `json:"type"`
+	RedirectToHTTPS bool                   `json:"redirect_to_https"`
+	WWWRedirect     bool                   `json:"www_redirect"`
+	CDNEnabled      bool                   `json:"cdn_enabled"`
+	WAFEnabled      bool                   `json:"waf_enabled"`
+	Metadata        map[string]interface{} `json:"metadata"`
+}
+
+// DNSSetupInstructions represents DNS setup instructions
+type DNSSetupInstructions struct {
+	Domain      string      `json:"domain"`
+	Records     []DNSRecord `json:"records"`
+	Instructions string     `json:"instructions"`
+	Examples    []string    `json:"examples"`
+	Notes       []string    `json:"notes"`
+}
+
+// NewDomainManager creates a new domain manager
+func NewDomainManager(store *storage.SecureStore, auditLogger *logging.AuditLogger, 
+	baseDomain, dnsProvider, acmeEmail string) *DomainManager {
+	
+	dm := &DomainManager{
+		store:       store,
+		auditLogger: auditLogger,
+		domains:     make(map[string]*Domain),
+		subdomains:  make(map[string]*Subdomain),
+		sslCerts:    make(map[string]*SSLCertificate),
+		baseDomain:  baseDomain,
+		dnsProvider: dnsProvider,
+		acmeEmail:   acmeEmail,
+		traefikConfig: &TraefikConfig{
+			Enabled:      true,
+			CertResolver: "letsencrypt",
+			Networks:     []string{"web"},
+			DefaultHeaders: map[string]string{
+				"X-Frame-Options":        "DENY",
+				"X-Content-Type-Options": "nosniff",
+				"X-XSS-Protection":       "1; mode=block",
+			},
+		},
+	}
+
+	// Load existing domains and certificates
+	if err := dm.loadDomainsAndCerts(); err != nil {
+		logrus.Warnf("Failed to load existing domains and certificates: %v", err)
+	}
+
+	// Start certificate renewal monitor
+	go dm.startCertificateMonitor()
+
+	return dm
+}
+
+// CreateCustomDomain creates a new custom domain
+func (dm *DomainManager) CreateCustomDomain(ctx context.Context, req *CreateDomainRequest) (*Domain, error) {
+	dm.mu.Lock()
+	defer dm.mu.Unlock()
+
+	// Validate domain name
+	if err := dm.validateDomainName(req.Name); err != nil {
+		return nil, fmt.Errorf("invalid domain name: %w", err)
+	}
+
+	// Check if domain already exists
+	for _, domain := range dm.domains {
+		if domain.Name == req.Name {
+			return nil, fmt.Errorf("domain already exists: %s", req.Name)
+		}
+	}
+
+	// Generate domain ID
+	domainID := dm.generateDomainID()
+
+	// Generate verification token
+	verificationToken := dm.generateVerificationToken()
+
+	// Create DNS records for verification
+	dnsRecords := dm.generateDNSRecords(req.Name, req.Type)
+
+	// Create domain
+	domain := &Domain{
+		ID:           domainID,
+		Name:         req.Name,
+		CustomerID:   req.CustomerID,
+		DeploymentID: req.DeploymentID,
+		Status:       DomainStatusPending,
+		Type:         req.Type,
+		DNSRecords:   dnsRecords,
+		Verification: DomainVerification{
+			Method:        "dns",
+			Status:        "pending",
+			Token:         verificationToken,
+			LastCheckedAt: time.Now(),
+		},
+		RedirectToHTTPS: req.RedirectToHTTPS,
+		WWWRedirect:     req.WWWRedirect,
+		CDNEnabled:      req.CDNEnabled,
+		WAFEnabled:      req.WAFEnabled,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+		Metadata:        req.Metadata,
+	}
+
+	// Generate Traefik rule
+	domain.TraefikRule = dm.generateTraefikRule(req.Name)
+
+	// Store domain
+	dm.domains[domainID] = domain
+	if err := dm.saveDomain(domain); err != nil {
+		delete(dm.domains, domainID)
+		return nil, fmt.Errorf("failed to save domain: %w", err)
+	}
+
+	dm.auditLogger.LogEvent("CUSTOM_DOMAIN_CREATED", map[string]interface{}{
+		"domain_id":     domainID,
+		"domain_name":   req.Name,
+		"customer_id":   req.CustomerID,
+		"deployment_id": req.DeploymentID,
+	})
+
+	logrus.Infof("Custom domain created: %s (%s)", req.Name, domainID)
+	return domain, nil
+}
+
+// CreateSubdomain creates a new subdomain
+func (dm *DomainManager) CreateSubdomain(customerID, deploymentID, region, prefix string) (*Subdomain, error) {
+	dm.mu.Lock()
+	defer dm.mu.Unlock()
+
+	// Generate subdomain name
+	subdomainName := dm.generateSubdomainName(prefix, region)
+	fullDomain := fmt.Sprintf("%s.%s", subdomainName, dm.baseDomain)
+
+	// Check if subdomain already exists
+	for _, subdomain := range dm.subdomains {
+		if subdomain.FullDomain == fullDomain {
+			return nil, fmt.Errorf("subdomain already exists: %s", fullDomain)
+		}
+	}
+
+	// Generate subdomain ID
+	subdomainID := dm.generateSubdomainID()
+
+	// Create subdomain
+	subdomain := &Subdomain{
+		ID:           subdomainID,
+		Name:         subdomainName,
+		FullDomain:   fullDomain,
+		CustomerID:   customerID,
+		DeploymentID: deploymentID,
+		Status:       DomainStatusActive,
+		Region:       region,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+		Metadata:     make(map[string]interface{}),
+	}
+
+	// Generate Traefik rule
+	subdomain.TraefikRule = dm.generateTraefikRule(fullDomain)
+
+	// Store subdomain
+	dm.subdomains[subdomainID] = subdomain
+	if err := dm.saveSubdomain(subdomain); err != nil {
+		delete(dm.subdomains, subdomainID)
+		return nil, fmt.Errorf("failed to save subdomain: %w", err)
+	}
+
+	dm.auditLogger.LogEvent("SUBDOMAIN_CREATED", map[string]interface{}{
+		"subdomain_id":  subdomainID,
+		"full_domain":   fullDomain,
+		"customer_id":   customerID,
+		"deployment_id": deploymentID,
+	})
+
+	logrus.Infof("Subdomain created: %s (%s)", fullDomain, subdomainID)
+	return subdomain, nil
+}
+
+// IssueSSLCertificate issues an SSL certificate for a domain
+func (dm *DomainManager) IssueSSLCertificate(domainName string, alternateNames []string) (*SSLCertificate, error) {
+	dm.mu.Lock()
+	defer dm.mu.Unlock()
+
+	// Check if certificate already exists
+	for _, cert := range dm.sslCerts {
+		if cert.Domain == domainName && cert.Status == CertStatusValid {
+			return cert, nil
+		}
+	}
+
+	// Generate certificate ID
+	certID := dm.generateCertificateID()
+
+	// Create certificate
+	cert := &SSLCertificate{
+		ID:             certID,
+		Domain:         domainName,
+		AlternateNames: alternateNames,
+		Provider:       "letsencrypt",
+		Status:         CertStatusPending,
+		IssuedAt:       time.Now(),
+		ExpiresAt:      time.Now().AddDate(0, 0, 90), // 90 days for Let's Encrypt
+		RenewAt:        time.Now().AddDate(0, 0, 60), // Renew 30 days before expiry
+		AutoRenew:      true,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+		Metadata:       make(map[string]interface{}),
+	}
+
+	// Store certificate
+	dm.sslCerts[certID] = cert
+	if err := dm.saveSSLCertificate(cert); err != nil {
+		delete(dm.sslCerts, certID)
+		return nil, fmt.Errorf("failed to save SSL certificate: %w", err)
+	}
+
+	// Issue certificate (this would integrate with ACME/Let's Encrypt)
+	go dm.issueACMECertificate(cert)
+
+	dm.auditLogger.LogEvent("SSL_CERTIFICATE_REQUESTED", map[string]interface{}{
+		"cert_id":         certID,
+		"domain":          domainName,
+		"alternate_names": alternateNames,
+	})
+
+	logrus.Infof("SSL certificate requested: %s (%s)", domainName, certID)
+	return cert, nil
+}
+
+// VerifyDomain verifies domain ownership
+func (dm *DomainManager) VerifyDomain(domainID string) error {
+	dm.mu.Lock()
+	defer dm.mu.Unlock()
+
+	domain, exists := dm.domains[domainID]
+	if !exists {
+		return fmt.Errorf("domain not found: %s", domainID)
+	}
+
+	// Perform DNS verification
+	verified, err := dm.performDNSVerification(domain)
+	if err != nil {
+		domain.Verification.FailureReason = err.Error()
+		domain.Verification.RetryCount++
+		domain.UpdatedAt = time.Now()
+		dm.saveDomain(domain)
+		return fmt.Errorf("domain verification failed: %w", err)
+	}
+
+	if verified {
+		domain.Status = DomainStatusActive
+		domain.Verification.Status = "verified"
+		domain.Verification.VerifiedAt = &[]time.Time{time.Now()}[0]
+		domain.UpdatedAt = time.Now()
+
+		// Issue SSL certificate
+		if _, err := dm.IssueSSLCertificate(domain.Name, []string{}); err != nil {
+			logrus.Warnf("Failed to issue SSL certificate for %s: %v", domain.Name, err)
+		}
+
+		dm.auditLogger.LogEvent("DOMAIN_VERIFIED", map[string]interface{}{
+			"domain_id":   domainID,
+			"domain_name": domain.Name,
+		})
+
+		logrus.Infof("Domain verified: %s", domain.Name)
+	}
+
+	dm.saveDomain(domain)
+	return nil
+}
+
+// GetDNSSetupInstructions returns DNS setup instructions for a domain
+func (dm *DomainManager) GetDNSSetupInstructions(domainName string) (*DNSSetupInstructions, error) {
+	dm.mu.RLock()
+	defer dm.mu.RUnlock()
+
+	// Find domain
+	var domain *Domain
+	for _, d := range dm.domains {
+		if d.Name == domainName {
+			domain = d
+			break
+		}
+	}
+
+	if domain == nil {
+		return nil, fmt.Errorf("domain not found: %s", domainName)
+	}
+
+	instructions := &DNSSetupInstructions{
+		Domain:  domainName,
+		Records: domain.DNSRecords,
+		Instructions: fmt.Sprintf(`To complete the setup for %s, please add the following DNS records to your domain:
+
+1. Log in to your domain registrar's control panel
+2. Navigate to the DNS management section
+3. Add the DNS records listed below
+4. Wait for DNS propagation (up to 24 hours)
+5. Return to the SuperAgent dashboard to verify your domain`, domainName),
+		Examples: []string{
+			"Cloudflare: Dashboard → DNS → Add record",
+			"GoDaddy: DNS Management → Add record",
+			"Namecheap: Advanced DNS → Add new record",
+		},
+		Notes: []string{
+			"DNS propagation can take up to 24 hours",
+			"Make sure to use the exact values provided",
+			"Remove any conflicting existing records",
+			"Contact support if you need assistance",
+		},
+	}
+
+	return instructions, nil
+}
+
+// Helper functions
+
+func (dm *DomainManager) validateDomainName(domain string) error {
+	// Basic domain validation
+	if len(domain) == 0 {
+		return fmt.Errorf("domain name cannot be empty")
+	}
+
+	if len(domain) > 253 {
+		return fmt.Errorf("domain name too long")
+	}
+
+	// Check for valid domain format
+	domainRegex := regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$`)
+	if !domainRegex.MatchString(domain) {
+		return fmt.Errorf("invalid domain format")
+	}
+
+	return nil
+}
+
+func (dm *DomainManager) generateDomainID() string {
+	return fmt.Sprintf("dom_%d", time.Now().UnixNano())
+}
+
+func (dm *DomainManager) generateSubdomainID() string {
+	return fmt.Sprintf("sub_%d", time.Now().UnixNano())
+}
+
+func (dm *DomainManager) generateCertificateID() string {
+	return fmt.Sprintf("cert_%d", time.Now().UnixNano())
+}
+
+func (dm *DomainManager) generateVerificationToken() string {
+	return fmt.Sprintf("superagent-verify-%d", time.Now().Unix())
+}
+
+func (dm *DomainManager) generateSubdomainName(prefix, region string) string {
+	timestamp := time.Now().Unix() % 10000
+	if prefix == "" {
+		prefix = "app"
+	}
+	if region == "" {
+		region = "us"
+	}
+	
+	return fmt.Sprintf("%s-%d-%s", prefix, timestamp, region)
+}
+
+func (dm *DomainManager) generateDNSRecords(domain string, domainType DomainType) []DNSRecord {
+	// Get the IP address of this server (would be dynamic in production)
+	serverIP := dm.getServerIP()
+	
+	records := []DNSRecord{
+		{
+			Type:     "A",
+			Name:     domain,
+			Value:    serverIP,
+			TTL:      300,
+			Required: true,
+			Status:   "pending",
+		},
+		{
+			Type:     "TXT",
+			Name:     fmt.Sprintf("_superagent-verify.%s", domain),
+			Value:    dm.generateVerificationToken(),
+			TTL:      300,
+			Required: true,
+			Status:   "pending",
+		},
+	}
+
+	// Add www CNAME if not a wildcard domain
+	if domainType != DomainTypeWildcard && !strings.HasPrefix(domain, "www.") {
+		records = append(records, DNSRecord{
+			Type:     "CNAME",
+			Name:     fmt.Sprintf("www.%s", domain),
+			Value:    domain,
+			TTL:      300,
+			Required: false,
+			Status:   "pending",
+		})
+	}
+
+	return records
+}
+
+func (dm *DomainManager) generateTraefikRule(domain string) string {
+	return fmt.Sprintf("Host(`%s`)", domain)
+}
+
+func (dm *DomainManager) getServerIP() string {
+	// In production, this would get the actual server IP
+	// For now, return a placeholder
+	return "127.0.0.1"
+}
+
+func (dm *DomainManager) performDNSVerification(domain *Domain) (bool, error) {
+	// Check for verification TXT record
+	txtRecords, err := net.LookupTXT(fmt.Sprintf("_superagent-verify.%s", domain.Name))
+	if err != nil {
+		return false, fmt.Errorf("failed to lookup TXT record: %w", err)
+	}
+
+	for _, record := range txtRecords {
+		if record == domain.Verification.Token {
+			return true, nil
+		}
+	}
+
+	return false, fmt.Errorf("verification TXT record not found")
+}
+
+func (dm *DomainManager) issueACMECertificate(cert *SSLCertificate) {
+	// This would integrate with ACME/Let's Encrypt
+	// For now, simulate certificate issuance
+	time.Sleep(5 * time.Second)
+
+	dm.mu.Lock()
+	defer dm.mu.Unlock()
+
+	cert.Status = CertStatusValid
+	cert.UpdatedAt = time.Now()
+	cert.CertificateData = "-----BEGIN CERTIFICATE-----\n... (simulated) ...\n-----END CERTIFICATE-----"
+	cert.PrivateKeyData = "-----BEGIN PRIVATE KEY-----\n... (simulated) ...\n-----END PRIVATE KEY-----"
+
+	dm.saveSSLCertificate(cert)
+
+	dm.auditLogger.LogEvent("SSL_CERTIFICATE_ISSUED", map[string]interface{}{
+		"cert_id": cert.ID,
+		"domain":  cert.Domain,
+	})
+
+	logrus.Infof("SSL certificate issued: %s", cert.Domain)
+}
+
+func (dm *DomainManager) startCertificateMonitor() {
+	ticker := time.NewTicker(24 * time.Hour) // Check daily
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			dm.checkAndRenewCertificates()
+		}
+	}
+}
+
+func (dm *DomainManager) checkAndRenewCertificates() {
+	dm.mu.RLock()
+	defer dm.mu.RUnlock()
+
+	for _, cert := range dm.sslCerts {
+		if cert.AutoRenew && time.Now().After(cert.RenewAt) {
+			go dm.renewCertificate(cert)
+		}
+	}
+}
+
+func (dm *DomainManager) renewCertificate(cert *SSLCertificate) {
+	logrus.Infof("Renewing SSL certificate: %s", cert.Domain)
+	
+	// Update certificate status
+	cert.Status = CertStatusRenewing
+	cert.UpdatedAt = time.Now()
+	dm.saveSSLCertificate(cert)
+
+	// Simulate certificate renewal
+	time.Sleep(10 * time.Second)
+
+	cert.Status = CertStatusValid
+	cert.IssuedAt = time.Now()
+	cert.ExpiresAt = time.Now().AddDate(0, 0, 90)
+	cert.RenewAt = time.Now().AddDate(0, 0, 60)
+	cert.UpdatedAt = time.Now()
+
+	dm.saveSSLCertificate(cert)
+
+	dm.auditLogger.LogEvent("SSL_CERTIFICATE_RENEWED", map[string]interface{}{
+		"cert_id": cert.ID,
+		"domain":  cert.Domain,
+	})
+
+	logrus.Infof("SSL certificate renewed: %s", cert.Domain)
+}
+
+func (dm *DomainManager) saveDomain(domain *Domain) error {
+	domainData := map[string]interface{}{
+		"domain": domain,
+	}
+	return dm.store.StoreDeploymentState(fmt.Sprintf("domain_%s", domain.ID), domainData)
+}
+
+func (dm *DomainManager) saveSubdomain(subdomain *Subdomain) error {
+	subdomainData := map[string]interface{}{
+		"subdomain": subdomain,
+	}
+	return dm.store.StoreDeploymentState(fmt.Sprintf("subdomain_%s", subdomain.ID), subdomainData)
+}
+
+func (dm *DomainManager) saveSSLCertificate(cert *SSLCertificate) error {
+	certData := map[string]interface{}{
+		"certificate": cert,
+	}
+	return dm.store.StoreDeploymentState(fmt.Sprintf("cert_%s", cert.ID), certData)
+}
+
+func (dm *DomainManager) loadDomainsAndCerts() error {
+	// This would load domains and certificates from storage
+	// For now, we'll implement basic loading
+	return nil
+}
