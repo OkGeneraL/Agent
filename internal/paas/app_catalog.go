@@ -746,7 +746,176 @@ func (ac *AppCatalog) saveLicense(license *AppLicense) error {
 }
 
 func (ac *AppCatalog) loadAppsAndLicenses() error {
-	// This would load apps and licenses from storage
-	// For now, we'll implement basic loading
+	logrus.Info("Loading applications and licenses from secure storage...")
+	
+	// Load all app data from storage
+	data, err := ac.store.LoadData()
+	if err != nil {
+		return fmt.Errorf("failed to load app data: %w", err)
+	}
+
+	if data == nil || data.Data == nil {
+		logrus.Info("No existing app data found, starting fresh")
+		return nil
+	}
+
+	// Load applications from storage
+	if appsData, exists := data.Data["applications"]; exists {
+		if appsMap, ok := appsData.(map[string]interface{}); ok {
+			for appID, appData := range appsMap {
+				if appMap, ok := appData.(map[string]interface{}); ok {
+					app := &Application{}
+					
+					// Deserialize application data
+					if id, ok := appMap["id"].(string); ok {
+						app.ID = id
+					}
+					if name, ok := appMap["name"].(string); ok {
+						app.Name = name
+					}
+					if description, ok := appMap["description"].(string); ok {
+						app.Description = description
+					}
+					if category, ok := appMap["category"].(string); ok {
+						app.Category = category
+					}
+					if appType, ok := appMap["type"].(string); ok {
+						app.Type = ApplicationType(appType)
+					}
+					if publisherID, ok := appMap["publisher_id"].(string); ok {
+						app.PublisherID = publisherID
+					}
+					if publisherName, ok := appMap["publisher_name"].(string); ok {
+						app.PublisherName = publisherName
+					}
+					if status, ok := appMap["status"].(string); ok {
+						app.Status = ApplicationStatus(status)
+					}
+					if latestVersion, ok := appMap["latest_version"].(string); ok {
+						app.LatestVersion = latestVersion
+					}
+					if createdAt, ok := appMap["created_at"].(string); ok {
+						if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
+							app.CreatedAt = t
+						}
+					}
+					if updatedAt, ok := appMap["updated_at"].(string); ok {
+						if t, err := time.Parse(time.RFC3339, updatedAt); err == nil {
+							app.UpdatedAt = t
+						}
+					}
+
+					// Load source configuration
+					if sourceData, ok := appMap["source"].(map[string]interface{}); ok {
+						source := &ApplicationSource{}
+						if sourceType, ok := sourceData["type"].(string); ok {
+							source.Type = SourceType(sourceType)
+						}
+						if gitURL, ok := sourceData["git_url"].(string); ok {
+							source.GitURL = gitURL
+						}
+						if gitBranch, ok := sourceData["git_branch"].(string); ok {
+							source.GitBranch = gitBranch
+						}
+						if dockerImage, ok := sourceData["docker_image"].(string); ok {
+							source.DockerImage = dockerImage
+						}
+						if dockerTag, ok := sourceData["docker_tag"].(string); ok {
+							source.DockerTag = dockerTag
+						}
+						app.Source = source
+					}
+
+					// Load pricing information
+					if pricingData, ok := appMap["pricing"].(map[string]interface{}); ok {
+						pricing := &PricingInfo{}
+						if model, ok := pricingData["model"].(string); ok {
+							pricing.Model = PricingModel(model)
+						}
+						if price, ok := pricingData["price"].(float64); ok {
+							pricing.Price = price
+						}
+						if currency, ok := pricingData["currency"].(string); ok {
+							pricing.Currency = currency
+						}
+						if billingCycle, ok := pricingData["billing_cycle"].(string); ok {
+							pricing.BillingCycle = billingCycle
+						}
+						if trialDays, ok := pricingData["trial_days"].(float64); ok {
+							pricing.TrialDays = int(trialDays)
+						}
+						app.Pricing = pricing
+					}
+
+					// Load features
+					if featuresData, ok := appMap["features"].([]interface{}); ok {
+						for _, feature := range featuresData {
+							if featureStr, ok := feature.(string); ok {
+								app.Features = append(app.Features, featureStr)
+							}
+						}
+					}
+
+					// Load tags
+					if tagsData, ok := appMap["tags"].([]interface{}); ok {
+						for _, tag := range tagsData {
+							if tagStr, ok := tag.(string); ok {
+								app.Tags = append(app.Tags, tagStr)
+							}
+						}
+					}
+
+					// Store in memory
+					ac.applications[appID] = app
+					logrus.Debugf("Loaded application: %s (%s)", app.Name, app.Category)
+				}
+			}
+		}
+	}
+
+	// Load licenses from storage
+	if licensesData, exists := data.Data["licenses"]; exists {
+		if licensesMap, ok := licensesData.(map[string]interface{}); ok {
+			for licenseID, licenseData := range licensesMap {
+				if licenseMap, ok := licenseData.(map[string]interface{}); ok {
+					license := &AppLicense{}
+					
+					// Deserialize license data
+					if id, ok := licenseMap["id"].(string); ok {
+						license.ID = id
+					}
+					if customerID, ok := licenseMap["customer_id"].(string); ok {
+						license.CustomerID = customerID
+					}
+					if appID, ok := licenseMap["app_id"].(string); ok {
+						license.AppID = appID
+					}
+					if licenseType, ok := licenseMap["type"].(string); ok {
+						license.Type = LicenseType(licenseType)
+					}
+					if status, ok := licenseMap["status"].(string); ok {
+						license.Status = LicenseStatus(status)
+					}
+					if issuedAt, ok := licenseMap["issued_at"].(string); ok {
+						if t, err := time.Parse(time.RFC3339, issuedAt); err == nil {
+							license.IssuedAt = t
+						}
+					}
+					if expiresAt, ok := licenseMap["expires_at"].(string); ok {
+						if t, err := time.Parse(time.RFC3339, expiresAt); err == nil {
+							license.ExpiresAt = &t
+						}
+					}
+
+					// Store in memory
+					ac.licenses[licenseID] = license
+					logrus.Debugf("Loaded license: %s for customer %s", license.ID, license.CustomerID)
+				}
+			}
+		}
+	}
+
+	logrus.Infof("Successfully loaded %d applications and %d licenses from storage", 
+		len(ac.applications), len(ac.licenses))
 	return nil
 }

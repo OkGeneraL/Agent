@@ -598,7 +598,124 @@ func (um *UserManager) saveCustomer(customer *Customer) error {
 }
 
 func (um *UserManager) loadUsers() error {
-	// This would load users from storage
-	// For now, we'll implement basic loading
+	logrus.Info("Loading customers from secure storage...")
+	
+	// Load all customer data from storage
+	data, err := um.store.LoadData()
+	if err != nil {
+		return fmt.Errorf("failed to load customer data: %w", err)
+	}
+
+	if data == nil || data.Data == nil {
+		logrus.Info("No existing customer data found, starting fresh")
+		return nil
+	}
+
+	// Load customers from storage
+	if customersData, exists := data.Data["customers"]; exists {
+		if customersMap, ok := customersData.(map[string]interface{}); ok {
+			for customerID, customerData := range customersMap {
+				if customerMap, ok := customerData.(map[string]interface{}); ok {
+					customer := &Customer{}
+					
+					// Deserialize customer data
+					if id, ok := customerMap["id"].(string); ok {
+						customer.ID = id
+					}
+					if email, ok := customerMap["email"].(string); ok {
+						customer.Email = email
+					}
+					if name, ok := customerMap["name"].(string); ok {
+						customer.Name = name
+					}
+					if company, ok := customerMap["company"].(string); ok {
+						customer.Company = company
+					}
+					if plan, ok := customerMap["plan"].(string); ok {
+						customer.Plan = plan
+					}
+					if status, ok := customerMap["status"].(string); ok {
+						customer.Status = CustomerStatus(status)
+					}
+					if apiKey, ok := customerMap["api_key"].(string); ok {
+						customer.APIKey = apiKey
+					}
+					if subdomainPrefix, ok := customerMap["subdomain_prefix"].(string); ok {
+						customer.SubdomainPrefix = subdomainPrefix
+					}
+					if createdAt, ok := customerMap["created_at"].(string); ok {
+						if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
+							customer.CreatedAt = t
+						}
+					}
+					if updatedAt, ok := customerMap["updated_at"].(string); ok {
+						if t, err := time.Parse(time.RFC3339, updatedAt); err == nil {
+							customer.UpdatedAt = t
+						}
+					}
+
+					// Load resource quotas
+					if quotasData, ok := customerMap["resource_quotas"].(map[string]interface{}); ok {
+						quotas := &ResourceQuotas{}
+						if cpuCores, ok := quotasData["cpu_cores"].(float64); ok {
+							quotas.CPUCores = int(cpuCores)
+						}
+						if memoryGB, ok := quotasData["memory_gb"].(float64); ok {
+							quotas.MemoryGB = int(memoryGB)
+						}
+						if storageGB, ok := quotasData["storage_gb"].(float64); ok {
+							quotas.StorageGB = int(storageGB)
+						}
+						if bandwidthGB, ok := quotasData["bandwidth_gb"].(float64); ok {
+							quotas.BandwidthGB = int(bandwidthGB)
+						}
+						if containers, ok := quotasData["containers"].(float64); ok {
+							quotas.Containers = int(containers)
+						}
+						if applications, ok := quotasData["applications"].(float64); ok {
+							quotas.Applications = int(applications)
+						}
+						if domains, ok := quotasData["domains"].(float64); ok {
+							quotas.Domains = int(domains)
+						}
+						customer.ResourceQuotas = quotas
+					}
+
+					// Load resource usage
+					if usageData, ok := customerMap["resource_usage"].(map[string]interface{}); ok {
+						usage := &ResourceUsage{}
+						if cpuCores, ok := usageData["cpu_cores"].(float64); ok {
+							usage.CPUCores = cpuCores
+						}
+						if memoryGB, ok := usageData["memory_gb"].(float64); ok {
+							usage.MemoryGB = memoryGB
+						}
+						if storageGB, ok := usageData["storage_gb"].(float64); ok {
+							usage.StorageGB = storageGB
+						}
+						if bandwidthGB, ok := usageData["bandwidth_gb"].(float64); ok {
+							usage.BandwidthGB = bandwidthGB
+						}
+						if containers, ok := usageData["containers"].(float64); ok {
+							usage.Containers = int(containers)
+						}
+						if applications, ok := usageData["applications"].(float64); ok {
+							usage.Applications = int(applications)
+						}
+						if domains, ok := usageData["domains"].(float64); ok {
+							usage.Domains = int(domains)
+						}
+						customer.ResourceUsage = usage
+					}
+
+					// Store in memory
+					um.customers[customerID] = customer
+					logrus.Debugf("Loaded customer: %s (%s)", customer.Name, customer.Email)
+				}
+			}
+		}
+	}
+
+	logrus.Infof("Successfully loaded %d customers from storage", len(um.customers))
 	return nil
 }
