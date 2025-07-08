@@ -211,10 +211,25 @@ CREATE TABLE servers (
     max_deployments INTEGER DEFAULT 50,
     current_deployments INTEGER DEFAULT 0,
     api_endpoint TEXT,
-    api_token_hash TEXT,
     last_heartbeat TIMESTAMPTZ,
     health_score DECIMAL(5,2) DEFAULT 100.0,
     metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Server Authentication Tokens
+CREATE TABLE server_tokens (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    server_id UUID REFERENCES servers(id) ON DELETE CASCADE,
+    token_hash VARCHAR(64) NOT NULL UNIQUE, -- SHA-256 hash of the token
+    token_prefix VARCHAR(12) NOT NULL, -- First 12 chars for identification (sa_xxxxxxxx)
+    expires_at TIMESTAMPTZ NOT NULL,
+    is_active BOOLEAN DEFAULT TRUE,
+    last_used_at TIMESTAMPTZ,
+    created_by UUID REFERENCES admin_users(id),
+    revoked_at TIMESTAMPTZ,
+    revoked_by UUID REFERENCES admin_users(id),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -593,6 +608,13 @@ CREATE INDEX idx_servers_status ON servers(status);
 CREATE INDEX idx_servers_provider ON servers(provider);
 CREATE INDEX idx_servers_last_heartbeat ON servers(last_heartbeat);
 
+-- Server tokens indexes
+CREATE INDEX idx_server_tokens_server_id ON server_tokens(server_id);
+CREATE INDEX idx_server_tokens_hash ON server_tokens(token_hash);
+CREATE INDEX idx_server_tokens_active ON server_tokens(is_active);
+CREATE INDEX idx_server_tokens_expires ON server_tokens(expires_at);
+CREATE INDEX idx_server_tokens_last_used ON server_tokens(last_used_at DESC);
+
 -- Domain indexes
 CREATE INDEX idx_domains_customer_id ON domains(customer_id);
 CREATE INDEX idx_domains_domain ON domains(domain);
@@ -662,6 +684,7 @@ CREATE TRIGGER update_customers_updated_at BEFORE UPDATE ON customers FOR EACH R
 CREATE TRIGGER update_applications_updated_at BEFORE UPDATE ON applications FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_deployments_updated_at BEFORE UPDATE ON deployments FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_servers_updated_at BEFORE UPDATE ON servers FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_server_tokens_updated_at BEFORE UPDATE ON server_tokens FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_domains_updated_at BEFORE UPDATE ON domains FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- Function to calculate invoice totals

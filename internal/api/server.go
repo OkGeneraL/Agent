@@ -21,6 +21,7 @@ type APIServer struct {
 	config          *config.Config
 	auditLogger     *logging.AuditLogger
 	deploymentEngine *deploy.DeploymentEngine
+	authMiddleware  *AuthMiddleware
 	router          *mux.Router
 	server          *http.Server
 	startTime       time.Time
@@ -73,6 +74,7 @@ func NewAPIServer(cfg *config.Config, auditLogger *logging.AuditLogger, deployme
 		config:          cfg,
 		auditLogger:     auditLogger,
 		deploymentEngine: deploymentEngine,
+		authMiddleware:  NewAuthMiddleware(cfg, auditLogger),
 		router:          mux.NewRouter(),
 		startTime:       time.Now(),
 	}
@@ -107,6 +109,7 @@ func (s *APIServer) setupRoutes() {
 	// Add middleware
 	s.router.Use(s.loggingMiddleware)
 	s.router.Use(s.corsMiddleware)
+	s.router.Use(s.authMiddleware.Middleware)
 }
 
 // Start starts the API server

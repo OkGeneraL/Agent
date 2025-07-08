@@ -11,10 +11,12 @@ export interface AgentServer {
   hostname: string
   ip_address: string
   api_endpoint: string
-  api_token_hash: string
   status: 'online' | 'offline' | 'maintenance' | 'error'
   location: string
   provider: string
+  cpu_cores: number
+  memory_gb: number
+  disk_gb: number
   created_at: string
   updated_at: string
 }
@@ -36,18 +38,28 @@ export class AgentManager {
    */
   private async loadAgentCredentials() {
     try {
-      const { data: servers, error } = await supabase
-        .from('servers')
-        .select('id, api_endpoint, api_token_hash')
-        .eq('status', 'online')
+      const { data: tokenData, error } = await supabase
+        .from('server_tokens')
+        .select(`
+          server_id,
+          token_hash,
+          servers (
+            api_endpoint
+          )
+        `)
+        .eq('is_active', true)
+        .gt('expires_at', new Date().toISOString())
 
       if (error) throw error
 
-      for (const server of servers || []) {
-        this.agentCredentials.set(server.id, {
-          endpoint: server.api_endpoint,
-          token: server.api_token_hash // In production, decrypt this
-        })
+      for (const tokenRecord of tokenData || []) {
+        const serverData = Array.isArray(tokenRecord.servers) ? tokenRecord.servers[0] : tokenRecord.servers
+        if (serverData && serverData.api_endpoint) {
+          this.agentCredentials.set(tokenRecord.server_id, {
+            endpoint: serverData.api_endpoint,
+            token: tokenRecord.token_hash // This will be replaced with actual token during authentication
+          })
+        }
       }
     } catch (error) {
       console.error('Failed to load agent credentials:', error)
@@ -75,14 +87,11 @@ export class AgentManager {
    * Add a new SuperAgent server
    */
   async addAgentServer(server: Omit<AgentServer, 'id' | 'created_at' | 'updated_at'>): Promise<AgentServer | null> {
-    // Test connectivity first
-    const isHealthy = await this.testAgentConnection(server.api_endpoint, server.api_token_hash)
-    
     const { data, error } = await supabase
       .from('servers')
       .insert([{
         ...server,
-        status: isHealthy ? 'online' : 'error'
+        status: 'offline' // Initial status, will be updated after token configuration
       }])
       .select()
       .single()
@@ -92,39 +101,32 @@ export class AgentManager {
       return null
     }
 
-    // Update in-memory credentials
-    this.agentCredentials.set(data.id, {
-      endpoint: server.api_endpoint,
-      token: server.api_token_hash
-    })
-
     return data
   }
 
   /**
-   * Update agent server credentials
+   * Update agent server endpoint
    */
-  async updateAgentCredentials(serverId: string, endpoint: string, token: string): Promise<boolean> {
-    // Test new credentials first
-    const isHealthy = await this.testAgentConnection(endpoint, token)
-    
+  async updateAgentEndpoint(serverId: string, endpoint: string): Promise<boolean> {
     const { error } = await supabase
       .from('servers')
       .update({
         api_endpoint: endpoint,
-        api_token_hash: token,
-        status: isHealthy ? 'online' : 'error',
         updated_at: new Date().toISOString()
       })
       .eq('id', serverId)
 
     if (error) {
-      console.error('Failed to update agent credentials:', error)
+      console.error('Failed to update agent endpoint:', error)
       return false
     }
 
-    // Update in-memory credentials
-    this.agentCredentials.set(serverId, { endpoint, token })
+    // Update in-memory credentials if they exist
+    const credentials = this.agentCredentials.get(serverId)
+    if (credentials) {
+      this.agentCredentials.set(serverId, { ...credentials, endpoint })
+    }
+    
     return true
   }
 
