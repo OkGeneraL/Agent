@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-
-// SuperAgent API configuration
-const SUPERAGENT_API_BASE_URL = process.env.NEXT_PUBLIC_SUPERAGENT_API_URL || 'http://localhost:8080/api/v1'
-const SUPERAGENT_API_TOKEN = process.env.SUPERAGENT_API_TOKEN || ''
+import { agentManager } from '@/lib/agents'
 
 // Types for SuperAgent API responses
 interface SuperAgentDeployment {
@@ -33,25 +30,7 @@ interface EnrichedDeployment extends SuperAgentDeployment {
   health_status: string
 }
 
-// Helper function to make authenticated requests to SuperAgent API
-async function superAgentRequest(endpoint: string, options: RequestInit = {}) {
-  const url = `${SUPERAGENT_API_BASE_URL}${endpoint}`
-  
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${SUPERAGENT_API_TOKEN}`,
-      ...options.headers,
-    },
-  })
-
-  if (!response.ok) {
-    throw new Error(`SuperAgent API error: ${response.status} ${response.statusText}`)
-  }
-
-  return response.json()
-}
+// No longer needed - using AgentManager for multi-server support
 
 // GET /api/deployments - List all deployments
 export async function GET(request: NextRequest) {
@@ -61,8 +40,22 @@ export async function GET(request: NextRequest) {
     const server_id = searchParams.get('server_id')
     const customer_id = searchParams.get('customer_id')
 
-    // Fetch deployments from SuperAgent API
-    const deployments = await superAgentRequest('/deployments')
+    // Fetch deployments from all SuperAgent servers
+    const agentData = await agentManager.getAggregatedData()
+    const deployments: SuperAgentDeployment[] = agentData.flatMap(agent => {
+      // Safely convert unknown records to deployment format
+      const agentDeployments = agent.deployments as Record<string, unknown>[]
+      return agentDeployments.map(dep => ({
+        id: String(dep.id || ''),
+        status: String(dep.status || 'unknown'),
+        message: String(dep.message || ''),
+        app_id: String(dep.app_id || ''),
+        version: String(dep.version || ''),
+        container_id: dep.container_id ? String(dep.container_id) : undefined,
+        created_at: String(dep.created_at || new Date().toISOString()),
+        metadata: (dep.metadata as Record<string, unknown>) || {}
+      }))
+    })
     
     // Fetch additional data from database (customers, applications, servers)
     // In a real implementation, you would fetch this from Supabase
@@ -146,11 +139,15 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Create deployment via SuperAgent API
-    const deployment = await superAgentRequest('/deployments', {
-      method: 'POST',
-      body: JSON.stringify(deploymentRequest)
-    })
+    // Create deployment via specific SuperAgent server
+    if (!server_id) {
+      return NextResponse.json(
+        { error: 'server_id is required to create deployment' },
+        { status: 400 }
+      )
+    }
+
+    const deployment = await agentManager.createDeployment(server_id, deploymentRequest)
 
     // Save deployment info to database
     // In a real implementation, you would save to Supabase here
