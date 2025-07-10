@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -70,16 +71,34 @@ func (ic *InteractiveCLI) StartInteractiveCLI() error {
 func (ic *InteractiveCLI) checkAdminPanelConnection() {
 	fmt.Println("\n🔍 Checking admin panel connection...")
 	
-	// Try to connect to admin panel API
-	// This would be implemented based on your admin panel API
-	ic.adminConnected = false
-	ic.adminPanelURL = ""
+	// Load previous configuration
+	ic.loadConfig()
 	
-	if ic.adminConnected {
+	if ic.adminPanelURL == "" {
+		ic.adminConnected = false
+		fmt.Println("❌ Admin panel not configured")
+		fmt.Println("💡 You can still use the CLI for local management")
+		return
+	}
+	
+	// Try to connect to admin panel API with timeout
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(ic.adminPanelURL + "/api/v1/health")
+	if err != nil {
+		ic.adminConnected = false
+		fmt.Printf("❌ Admin panel not reachable: %v\n", err)
+		fmt.Println("💡 You can still use the CLI for local management")
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		ic.adminConnected = true
 		fmt.Println("✅ Admin panel connected!")
 		fmt.Printf("🌐 Admin panel URL: %s\n", ic.adminPanelURL)
 	} else {
-		fmt.Println("❌ Admin panel not connected")
+		ic.adminConnected = false
+		fmt.Printf("❌ Admin panel health check failed (status: %d)\n", resp.StatusCode)
 		fmt.Println("💡 You can still use the CLI for local management")
 	}
 }
@@ -147,10 +166,26 @@ func (ic *InteractiveCLI) deployApplication() error {
 	
 	var repoURL string
 	if repoType == "public" {
-		repoURL = ic.promptString("Enter GitHub repository URL", "")
+		repoURL = ic.promptString("Enter GitHub repository URL (https://github.com/user/repo)", "")
 	} else {
-		repoURL = ic.promptString("Enter GitHub repository URL", "")
-		fmt.Println("🔐 For private repositories, ensure SSH keys or tokens are configured")
+		fmt.Println("🔐 Private Repository Setup Instructions:")
+		fmt.Println("  Option 1 - SSH Key Authentication:")
+		fmt.Println("    1. Generate SSH key: ssh-keygen -t ed25519 -C 'your_email@example.com'")
+		fmt.Println("    2. Add public key to GitHub: Settings → SSH and GPG keys")
+		fmt.Println("    3. Test connection: ssh -T git@github.com")
+		fmt.Println("  Option 2 - Personal Access Token:")
+		fmt.Println("    1. Create token: GitHub Settings → Developer settings → Personal access tokens")
+		fmt.Println("    2. Give 'repo' access permissions")
+		fmt.Println("    3. Use HTTPS URL with token in git credentials")
+		fmt.Println("")
+		
+		authChoice := ic.promptChoice("Authentication method", []string{"ssh", "token"})
+		if authChoice == "ssh" {
+			repoURL = ic.promptString("Enter GitHub SSH URL (git@github.com:user/repo.git)", "")
+		} else {
+			repoURL = ic.promptString("Enter GitHub HTTPS URL (https://github.com/user/repo.git)", "")
+			fmt.Println("💡 Ensure your git credentials are configured for this repository")
+		}
 	}
 
 	// Validate repository URL
@@ -521,7 +556,9 @@ func (ic *InteractiveCLI) configureBaseDomain() {
 		fmt.Printf("✅ Base domain set to: %s\n", ic.baseDomain)
 		
 		// Save to config
-		ic.saveConfig()
+		if err := ic.saveConfig(); err != nil {
+			fmt.Printf("⚠️  Warning: Failed to save configuration: %v\n", err)
+		}
 	}
 }
 
@@ -551,7 +588,9 @@ func (ic *InteractiveCLI) configureTraefik() {
 		fmt.Println("❌ Traefik disabled")
 	}
 	
-	ic.saveConfig()
+	if err := ic.saveConfig(); err != nil {
+		fmt.Printf("⚠️  Warning: Failed to save configuration: %v\n", err)
+	}
 }
 
 // configureTraefikSettings configures Traefik settings
@@ -594,7 +633,9 @@ func (ic *InteractiveCLI) configureAdminPanel() {
 		fmt.Println("❌ Admin panel connection disabled")
 	}
 	
-	ic.saveConfig()
+	if err := ic.saveConfig(); err != nil {
+		fmt.Printf("⚠️  Warning: Failed to save configuration: %v\n", err)
+	}
 }
 
 // viewCurrentConfig shows current configuration
@@ -827,12 +868,26 @@ func (ic *InteractiveCLI) cloneRepository(url, branch string) (string, error) {
 func (ic *InteractiveCLI) startAgent() error {
 	// Start agent in background
 	cmd := exec.Command("superagent", "start", "-d")
-	return cmd.Start()
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start agent process: %w", err)
+	}
+	
+	// Wait for agent to be ready
+	maxRetries := 10
+	for i := 0; i < maxRetries; i++ {
+		time.Sleep(1 * time.Second)
+		if ic.apiClient.IsAgentRunning() {
+			fmt.Println("✅ Agent started successfully")
+			return nil
+		}
+	}
+	
+	return fmt.Errorf("agent failed to start within %d seconds", maxRetries)
 }
 
 
 
-func (ic *InteractiveCLI) saveConfig() {
+func (ic *InteractiveCLI) saveConfig() error {
 	// Save configuration to file
 	config := map[string]interface{}{
 		"base_domain":      ic.baseDomain,
@@ -841,9 +896,53 @@ func (ic *InteractiveCLI) saveConfig() {
 		"admin_panel_url":  ic.adminPanelURL,
 	}
 	
-	configData, _ := yaml.Marshal(config)
+	configData, err := yaml.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+	
 	configPath := filepath.Join(os.Getenv("HOME"), ".superagent-interactive.yaml")
-	ioutil.WriteFile(configPath, configData, 0644)
+	if err := ioutil.WriteFile(configPath, configData, 0644); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+	
+	return nil
+}
+
+// loadConfig loads configuration from file
+func (ic *InteractiveCLI) loadConfig() error {
+	configPath := filepath.Join(os.Getenv("HOME"), ".superagent-interactive.yaml")
+	
+	data, err := ioutil.ReadFile(configPath)
+	if err != nil {
+		// File doesn't exist, use defaults
+		return nil
+	}
+	
+	var config map[string]interface{}
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return fmt.Errorf("failed to unmarshal config: %w", err)
+	}
+	
+	// Load configuration values
+	if domain, ok := config["base_domain"].(string); ok {
+		ic.baseDomain = domain
+		ic.traefikManager.SetBaseDomain(domain)
+	}
+	
+	if enabled, ok := config["traefik_enabled"].(bool); ok {
+		ic.traefikEnabled = enabled
+	}
+	
+	if connected, ok := config["admin_connected"].(bool); ok {
+		ic.adminConnected = connected
+	}
+	
+	if url, ok := config["admin_panel_url"].(string); ok {
+		ic.adminPanelURL = url
+	}
+	
+	return nil
 }
 
 func truncateString(s string, length int) string {

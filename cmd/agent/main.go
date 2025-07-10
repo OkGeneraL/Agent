@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -319,14 +321,33 @@ func installCmd() *cobra.Command {
 		Short: "Install SuperAgent as system service",
 		Long:  "Install SuperAgent as a systemd service for production deployment",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// TODO: Implementation would run installation script
-			fmt.Println("Installing SuperAgent...")
+			fmt.Println("Installing SuperAgent as system service...")
 			fmt.Printf("User: %s\n", user)
 			fmt.Printf("Data Directory: %s\n", dataDir)
+			
 			if systemd {
-				fmt.Println("Installing systemd service...")
+				// Run the install script
+				installCmd := exec.Command("/bin/bash", "./install.sh")
+				installCmd.Env = append(os.Environ(),
+					fmt.Sprintf("AGENT_USER=%s", user),
+					fmt.Sprintf("DATA_DIR=%s", dataDir),
+				)
+				installCmd.Stdout = os.Stdout
+				installCmd.Stderr = os.Stderr
+				
+				if err := installCmd.Run(); err != nil {
+					return fmt.Errorf("installation failed: %w", err)
+				}
+				
+				fmt.Println("✅ SuperAgent installed successfully as systemd service")
+				fmt.Println("📋 Next steps:")
+				fmt.Println("  1. Configure: sudo systemctl enable superagent")
+				fmt.Println("  2. Start: sudo systemctl start superagent")
+				fmt.Println("  3. Check status: sudo systemctl status superagent")
+			} else {
+				fmt.Println("⚠️  Manual installation mode - systemd service not created")
 			}
-			fmt.Println("SuperAgent installed successfully")
+			
 			return nil
 		},
 	}
@@ -346,12 +367,31 @@ func uninstallCmd() *cobra.Command {
 		Short: "Uninstall SuperAgent system service",
 		Long:  "Remove SuperAgent systemd service and cleanup installation",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// TODO: Implementation would run uninstallation
-			fmt.Println("Uninstalling SuperAgent...")
-			if force {
-				fmt.Println("Force removal enabled")
+			fmt.Println("Uninstalling SuperAgent system service...")
+			
+			if !force {
+				fmt.Print("⚠️  This will remove SuperAgent and all its data. Continue? [y/N]: ")
+				var response string
+				fmt.Scanln(&response)
+				if strings.ToLower(response) != "y" && strings.ToLower(response) != "yes" {
+					fmt.Println("❌ Uninstallation cancelled")
+					return nil
+				}
 			}
-			fmt.Println("SuperAgent uninstalled successfully")
+			
+			// Run the uninstall script
+			uninstallCmd := exec.Command("/bin/bash", "./uninstall.sh")
+			if force {
+				uninstallCmd.Env = append(os.Environ(), "FORCE=true")
+			}
+			uninstallCmd.Stdout = os.Stdout
+			uninstallCmd.Stderr = os.Stderr
+			
+			if err := uninstallCmd.Run(); err != nil {
+				return fmt.Errorf("uninstallation failed: %w", err)
+			}
+			
+			fmt.Println("✅ SuperAgent uninstalled successfully")
 			return nil
 		},
 	}
@@ -451,9 +491,44 @@ func configCmd() *cobra.Command {
 		Short: "Initialize configuration",
 		Long:  "Create a default configuration file",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// TODO: Implementation would create default config
 			fmt.Println("Creating default SuperAgent configuration...")
-			fmt.Println("Configuration initialized at ~/.superagent.yaml")
+			
+			// Initialize configuration
+			if err := initConfig(); err != nil {
+				return fmt.Errorf("failed to initialize config: %w", err)
+			}
+
+			// Create default config content
+			configContent := `# SuperAgent Configuration
+agent:
+  id: ""
+  work_dir: "/var/lib/superagent"
+  data_dir: "/var/lib/superagent/data"
+
+security:
+  encryption_key_file: "/etc/superagent/encryption.key"
+  audit_log_enabled: true
+
+monitoring:
+  enabled: true
+  metrics_port: 9090
+  health_check_port: 8080
+
+traefik:
+  enabled: false
+  base_domain: "yourdomain.com"
+`
+			
+			// Save to user home
+			configPath := filepath.Join(os.Getenv("HOME"), ".superagent.yaml")
+			if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+				return fmt.Errorf("failed to save config: %w", err)
+			}
+			
+			fmt.Printf("✅ Configuration initialized at %s\n", configPath)
+			fmt.Println("📋 Next steps:")
+			fmt.Println("  1. Edit the configuration file to customize settings")
+			fmt.Println("  2. Start the agent: superagent start")
 			return nil
 		},
 	})

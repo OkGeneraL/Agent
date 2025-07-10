@@ -3,6 +3,7 @@ package paas
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -649,12 +650,24 @@ func (pa *PaaSAgent) performHealthCheck(deployment *PaaSDeployment) (bool, int64
 	// 3. Check resource usage
 	// 4. Validate service connectivity
 	
-	// For now, simulate a realistic health check
+	// Perform actual health check
 	responseTime := time.Since(startTime).Milliseconds()
 	
-	// Simulate occasional issues (5% failure rate)
-	if time.Now().Unix()%20 == 0 {
-		return false, responseTime, fmt.Errorf("service unavailable")
+	// Try to perform HTTP health check if configured
+	if deployment.HealthCheck != nil {
+		if endpoint, ok := deployment.HealthCheck["endpoint"].(string); ok && endpoint != "" {
+			// Perform HTTP health check
+			client := &http.Client{Timeout: 10 * time.Second}
+			resp, err := client.Get(endpoint)
+			if err != nil {
+				return false, responseTime, fmt.Errorf("health check request failed: %w", err)
+			}
+			defer resp.Body.Close()
+			
+			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+				return false, responseTime, fmt.Errorf("health check returned status %d", resp.StatusCode)
+			}
+		}
 	}
 	
 	logrus.Debugf("Health check passed for deployment %s (response time: %dms)", 
