@@ -3,6 +3,8 @@ package deploy
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"os"
 	"sync"
 	"time"
 
@@ -392,10 +394,63 @@ func (de *DeploymentEngine) buildFromGit(ctx context.Context, deployment *Deploy
 	}
 	defer de.gitManager.CleanupRepository(repoPath)
 
-	// Build Docker image
+	// If Dockerfile is present, use normal Docker build
+	dockerfilePath := deployment.Source.Dockerfile
+	if dockerfilePath == "" {
+		dockerfilePath = filepath.Join(repoPath, "Dockerfile")
+	}
+	if _, err := os.Stat(dockerfilePath); err == nil {
+		buildContext := docker.BuildContext{
+			ContextPath:  repoPath,
+			Dockerfile:   deployment.Source.Dockerfile,
+			BuildPath:    deployment.Source.BuildPath,
+			ImageTag:     fmt.Sprintf("superagent/%s:%s", deployment.AppID, deployment.Version),
+			BuildArgs:    deployment.Environment,
+			Labels:       deployment.Labels,
+			NoCache:      false,
+			Pull:         true,
+			Target:       "",
+			Platform:     "linux/amd64",
+		}
+		imageID, err := de.dockerManager.BuildImage(ctx, buildContext, func(log string) {
+			de.addBuildLog(deployment, "info", log)
+		})
+		if err != nil {
+			return "", fmt.Errorf("failed to build image: %w", err)
+		}
+		return imageID, nil
+	}
+
+	// No Dockerfile: try JS auto-build
+	jsResult := AutoBuildJSApp(ctx, repoPath, deployment.Environment)
+	de.addBuildLog(deployment, "info", jsResult.BuildLog)
+	if !jsResult.Success {
+		return "", fmt.Errorf("js auto-build failed: %w", jsResult.Error)
+	}
+
+	// Create a minimal Dockerfile to run the JS app
+	dockerfileContent := "FROM node:18-alpine\nWORKDIR /app\nCOPY . .\nEXPOSE 3000\nCMD [\"%s\", \"%s\", \"%s\"]\n"
+	runCmd := jsResult.RunCommand
+	if len(runCmd) < 2 {
+		runCmd = []string{"npm", "run", "start"}
+	}
+	cmdStr := ""
+	for i, part := range runCmd {
+		if i > 0 {
+			cmdStr += ", "
+		}
+		cmdStr += fmt.Sprintf("\"%s\"", part)
+	}
+	dockerfileContent = fmt.Sprintf("FROM node:18-alpine\nWORKDIR /app\nCOPY . .\nEXPOSE 3000\nCMD [%s]\n", cmdStr)
+	dockerfilePath = filepath.Join(repoPath, "Dockerfile")
+	if err := os.WriteFile(dockerfilePath, []byte(dockerfileContent), 0644); err != nil {
+		return "", fmt.Errorf("failed to write generated Dockerfile: %w", err)
+	}
+	de.addBuildLog(deployment, "info", "[auto] Generated Dockerfile for JS app")
+
 	buildContext := docker.BuildContext{
 		ContextPath:  repoPath,
-		Dockerfile:   deployment.Source.Dockerfile,
+		Dockerfile:   "Dockerfile",
 		BuildPath:    deployment.Source.BuildPath,
 		ImageTag:     fmt.Sprintf("superagent/%s:%s", deployment.AppID, deployment.Version),
 		BuildArgs:    deployment.Environment,
@@ -405,15 +460,12 @@ func (de *DeploymentEngine) buildFromGit(ctx context.Context, deployment *Deploy
 		Target:       "",
 		Platform:     "linux/amd64",
 	}
-
 	imageID, err := de.dockerManager.BuildImage(ctx, buildContext, func(log string) {
 		de.addBuildLog(deployment, "info", log)
 	})
-
 	if err != nil {
-		return "", fmt.Errorf("failed to build image: %w", err)
+		return "", fmt.Errorf("failed to build image from generated Dockerfile: %w", err)
 	}
-
 	return imageID, nil
 }
 

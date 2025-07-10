@@ -21,6 +21,7 @@ type APIServer struct {
 	config          *config.Config
 	auditLogger     *logging.AuditLogger
 	deploymentEngine *deploy.DeploymentEngine
+	authMiddleware  *AuthMiddleware
 	router          *mux.Router
 	server          *http.Server
 	startTime       time.Time
@@ -73,6 +74,7 @@ func NewAPIServer(cfg *config.Config, auditLogger *logging.AuditLogger, deployme
 		config:          cfg,
 		auditLogger:     auditLogger,
 		deploymentEngine: deploymentEngine,
+		authMiddleware:  NewAuthMiddleware(cfg, auditLogger),
 		router:          mux.NewRouter(),
 		startTime:       time.Now(),
 	}
@@ -107,6 +109,7 @@ func (s *APIServer) setupRoutes() {
 	// Add middleware
 	s.router.Use(s.loggingMiddleware)
 	s.router.Use(s.corsMiddleware)
+	s.router.Use(s.authMiddleware.Middleware)
 }
 
 // Start starts the API server
@@ -365,11 +368,55 @@ func (s *APIServer) handleStartDeployment(w http.ResponseWriter, r *http.Request
 	vars := mux.Vars(r)
 	deploymentID := vars["id"]
 
-	// TODO: Implement start functionality
-	s.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"message": "Deployment start initiated",
-		"id":      deploymentID,
-	})
+	// Get the deployment first
+	deployment, err := s.deploymentEngine.GetDeployment(deploymentID)
+	if err != nil {
+		s.writeError(w, http.StatusNotFound, fmt.Sprintf("Deployment not found: %v", err))
+		return
+	}
+
+	// Check if deployment is already running
+	if deployment.Status == deploy.StatusRunning {
+		s.writeJSON(w, http.StatusOK, map[string]interface{}{
+			"message": "Deployment is already running",
+			"id":      deploymentID,
+			"status":  deployment.Status,
+		})
+		return
+	}
+
+	// Start the deployment by recreating it if it was stopped
+	if deployment.Status == deploy.StatusStopped || deployment.Status == deploy.StatusFailed {
+		// Create a new deployment request based on the existing deployment
+		request := &deploy.DeploymentRequest{
+			AppID:          deployment.AppID,
+			Version:        deployment.Version,
+			Source:         deployment.Source,
+			Config:         deployment.Config,
+			ResourceLimits: deployment.ResourceLimits,
+			HealthCheck:    deployment.HealthCheck,
+			Environment:    deployment.Environment,
+			Ports:          deployment.Ports,
+			Networks:       deployment.Networks,
+			Volumes:        deployment.Volumes,
+			Labels:         deployment.Labels,
+		}
+		
+		newDeployment, err := s.deploymentEngine.Deploy(request)
+		if err != nil {
+			s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to restart deployment: %v", err))
+			return
+		}
+		
+		s.writeJSON(w, http.StatusOK, map[string]interface{}{
+			"message":        "Deployment restart initiated",
+			"id":             deploymentID,
+			"new_deployment": newDeployment.ID,
+			"status":         newDeployment.Status,
+		})
+	} else {
+		s.writeError(w, http.StatusBadRequest, fmt.Sprintf("Cannot start deployment in status: %s", deployment.Status))
+	}
 }
 
 // handleStopDeployment handles stopping a deployment
@@ -393,10 +440,48 @@ func (s *APIServer) handleRestartDeployment(w http.ResponseWriter, r *http.Reque
 	vars := mux.Vars(r)
 	deploymentID := vars["id"]
 
-	// TODO: Implement restart functionality
+	// Get the deployment first
+	deployment, err := s.deploymentEngine.GetDeployment(deploymentID)
+	if err != nil {
+		s.writeError(w, http.StatusNotFound, fmt.Sprintf("Deployment not found: %v", err))
+		return
+	}
+
+	// Stop the current deployment first
+	if deployment.Status == deploy.StatusRunning {
+		if err := s.deploymentEngine.StopDeployment(deploymentID); err != nil {
+			s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to stop deployment: %v", err))
+			return
+		}
+	}
+
+	// Create a new deployment request based on the existing deployment
+	request := &deploy.DeploymentRequest{
+		AppID:          deployment.AppID,
+		Version:        deployment.Version,
+		Source:         deployment.Source,
+		Config:         deployment.Config,
+		ResourceLimits: deployment.ResourceLimits,
+		HealthCheck:    deployment.HealthCheck,
+		Environment:    deployment.Environment,
+		Ports:          deployment.Ports,
+		Networks:       deployment.Networks,
+		Volumes:        deployment.Volumes,
+		Labels:         deployment.Labels,
+	}
+	
+	// Deploy the new instance
+	newDeployment, err := s.deploymentEngine.Deploy(request)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to restart deployment: %v", err))
+		return
+	}
+	
 	s.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"message": "Deployment restart initiated",
-		"id":      deploymentID,
+		"message":        "Deployment restart initiated",
+		"old_id":         deploymentID,
+		"new_id":         newDeployment.ID,
+		"status":         newDeployment.Status,
 	})
 }
 
