@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bufio"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -17,12 +16,10 @@ import (
 
 	"superagent/internal/api"
 	"superagent/internal/config"
-	"superagent/internal/deploy"
 	"superagent/internal/logging"
 	"superagent/internal/traefik"
 
-	"github.com/sirupsen/logrus"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 // InteractiveCLI provides interactive CLI functionality
