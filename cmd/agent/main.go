@@ -11,6 +11,7 @@ import (
 
 	"superagent/internal/agent"
 	"superagent/internal/api"
+	"superagent/internal/cli"
 	"superagent/internal/config"
 	"superagent/internal/logging"
 
@@ -56,6 +57,7 @@ deployment capabilities similar to Vercel but with enterprise security and gover
 	rootCmd.AddCommand(logsCmd())
 	rootCmd.AddCommand(installCmd())
 	rootCmd.AddCommand(uninstallCmd())
+	rootCmd.AddCommand(interactiveCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -357,6 +359,38 @@ func uninstallCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&force, "force", false, "Force removal")
 
 	return cmd
+}
+
+func interactiveCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "interactive",
+		Short: "Start interactive CLI",
+		Long:  "Start SuperAgent interactive CLI for guided setup and deployment",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Initialize configuration
+			if err := initConfig(); err != nil {
+				return fmt.Errorf("failed to initialize config: %w", err)
+			}
+
+			// Load configuration
+			cfg, err := config.LoadDefault()
+			if err != nil {
+				return fmt.Errorf("failed to load config: %w", err)
+			}
+
+			// Initialize logging
+			auditLogger, err := logging.NewAuditLogger(cfg.Security.AuditLogPath)
+			if err != nil {
+				return fmt.Errorf("failed to initialize audit logger: %w", err)
+			}
+
+			// Create interactive CLI
+			interactiveCLI := cli.NewInteractiveCLI(cfg, auditLogger)
+
+			// Start interactive CLI
+			return interactiveCLI.StartInteractiveCLI()
+		},
+	}
 }
 
 func configCmd() *cobra.Command {
