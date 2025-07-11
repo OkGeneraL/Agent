@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -144,7 +143,7 @@ func (s *PaaSAPIServer) setupRoutes() {
 
 // Start starts the PaaS API server
 func (s *PaaSAPIServer) Start(ctx context.Context) error {
-	addr := fmt.Sprintf(":%d", s.config.API.Port)
+	addr := fmt.Sprintf(":%d", s.config.GetAPIPort())
 	
 	s.server = &http.Server{
 		Addr:         addr,

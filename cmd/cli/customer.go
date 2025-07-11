@@ -50,7 +50,7 @@ func newCustomerAddCmd() *cobra.Command {
 		Example: `  superagent-cli customer add --email john@example.com --name "John Doe" --company "Acme Corp" --plan professional
   superagent-cli customer add --email jane@startup.com --name "Jane Smith" --plan starter`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			paas, err := initializePaaS()
+			paasCli, err := initializePaaS()
 			if err != nil {
 				return err
 			}
@@ -125,7 +125,7 @@ func newCustomerAddCmd() *cobra.Command {
 			}
 
 			// Create customer
-			customer, err := paas.userManager.CreateCustomer(context.Background(), req)
+			customer, err := paasCli.userManager.CreateCustomer(context.Background(), req)
 			if err != nil {
 				printError(fmt.Sprintf("Failed to create customer: %v", err))
 				return err
@@ -177,12 +177,12 @@ func newCustomerListCmd() *cobra.Command {
   superagent-cli customer list --plan professional
   superagent-cli customer list --status active`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			paas, err := initializePaaS()
+			paasCli, err := initializePaaS()
 			if err != nil {
 				return err
 			}
 
-			customers := paas.userManager.ListCustomers()
+			customers := paasCli.userManager.ListCustomers()
 
 			if len(customers) == 0 {
 				printInfo("No customers found")
@@ -205,9 +205,9 @@ func newCustomerListCmd() *cobra.Command {
 			table := tablewriter.NewWriter(os.Stdout)
 			
 			if showQuotas {
-				table.SetHeader([]string{"ID", "Email", "Name", "Company", "Plan", "Status", "CPU", "Memory (MB)", "Storage (GB)", "Apps", "Created"})
+				table.Header([]string{"ID", "Email", "Name", "Company", "Plan", "Status", "CPU", "Memory (MB)", "Storage (GB)", "Apps", "Created"})
 			} else {
-				table.SetHeader([]string{"ID", "Email", "Name", "Company", "Plan", "Status", "Deployments", "Created"})
+				table.Header([]string{"ID", "Email", "Name", "Company", "Plan", "Status", "Deployments", "Created"})
 			}
 
 			for _, customer := range filteredCustomers {
@@ -262,7 +262,7 @@ func newCustomerShowCmd() *cobra.Command {
 		Example: `  superagent-cli customer show cust_12345
   superagent-cli customer show john@example.com`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			paas, err := initializePaaS()
+			paasCli, err := initializePaaS()
 			if err != nil {
 				return err
 			}
@@ -271,9 +271,9 @@ func newCustomerShowCmd() *cobra.Command {
 			
 			// Try to get by ID first, then by email
 			var customer *paas.Customer
-			customer, err = paas.userManager.GetCustomer(customerIDOrEmail)
+			customer, err = paasCli.userManager.GetCustomer(customerIDOrEmail)
 			if err != nil {
-				customer, err = paas.userManager.GetCustomerByEmail(customerIDOrEmail)
+				customer, err = paasCli.userManager.GetCustomerByEmail(customerIDOrEmail)
 				if err != nil {
 					printError(fmt.Sprintf("Customer not found: %s", customerIDOrEmail))
 					return err
@@ -369,7 +369,7 @@ func newCustomerUpdateCmd() *cobra.Command {
 		Example: `  superagent-cli customer update cust_12345 --plan professional
   superagent-cli customer update john@example.com --status suspended --name "John Smith"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			paas, err := initializePaaS()
+			paasCli, err := initializePaaS()
 			if err != nil {
 				return err
 			}
@@ -378,9 +378,9 @@ func newCustomerUpdateCmd() *cobra.Command {
 
 			// Get customer to update
 			var customer *paas.Customer
-			customer, err = paas.userManager.GetCustomer(customerIDOrEmail)
+			customer, err = paasCli.userManager.GetCustomer(customerIDOrEmail)
 			if err != nil {
-				customer, err = paas.userManager.GetCustomerByEmail(customerIDOrEmail)
+				customer, err = paasCli.userManager.GetCustomerByEmail(customerIDOrEmail)
 				if err != nil {
 					printError(fmt.Sprintf("Customer not found: %s", customerIDOrEmail))
 					return err
@@ -437,7 +437,7 @@ func newCustomerUpdateCmd() *cobra.Command {
 			}
 
 			// Update customer
-			err = paas.userManager.UpdateCustomer(customer.ID, updates)
+			err = paasCli.userManager.UpdateCustomer(customer.ID, updates)
 			if err != nil {
 				printError(fmt.Sprintf("Failed to update customer: %v", err))
 				return err
@@ -446,7 +446,7 @@ func newCustomerUpdateCmd() *cobra.Command {
 			printSuccess("Customer updated successfully")
 
 			// Show updated information
-			updatedCustomer, _ := paas.userManager.GetCustomer(customer.ID)
+			updatedCustomer, _ := paasCli.userManager.GetCustomer(customer.ID)
 			fmt.Printf("\n📋 Updated Customer:\n")
 			fmt.Printf("   Name: %s\n", updatedCustomer.Name)
 			fmt.Printf("   Company: %s\n", updatedCustomer.Company)
@@ -476,7 +476,7 @@ func newCustomerDeleteCmd() *cobra.Command {
 		Example: `  superagent-cli customer delete cust_12345
   superagent-cli customer delete john@example.com --force`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			paas, err := initializePaaS()
+			paasCli, err := initializePaaS()
 			if err != nil {
 				return err
 			}
@@ -485,9 +485,9 @@ func newCustomerDeleteCmd() *cobra.Command {
 
 			// Get customer to delete
 			var customer *paas.Customer
-			customer, err = paas.userManager.GetCustomer(customerIDOrEmail)
+			customer, err = paasCli.userManager.GetCustomer(customerIDOrEmail)
 			if err != nil {
-				customer, err = paas.userManager.GetCustomerByEmail(customerIDOrEmail)
+				customer, err = paasCli.userManager.GetCustomerByEmail(customerIDOrEmail)
 				if err != nil {
 					printError(fmt.Sprintf("Customer not found: %s", customerIDOrEmail))
 					return err
@@ -512,7 +512,7 @@ func newCustomerDeleteCmd() *cobra.Command {
 			}
 
 			// Delete customer
-			err = paas.userManager.DeleteCustomer(customer.ID)
+			err = paasCli.userManager.DeleteCustomer(customer.ID)
 			if err != nil {
 				printError(fmt.Sprintf("Failed to delete customer: %v", err))
 				return err
@@ -550,7 +550,7 @@ func newCustomerQuotaShowCmd() *cobra.Command {
 		Short: "Show customer resource quotas and usage",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			paas, err := initializePaaS()
+			paasCli, err := initializePaaS()
 			if err != nil {
 				return err
 			}
@@ -559,9 +559,9 @@ func newCustomerQuotaShowCmd() *cobra.Command {
 
 			// Get customer
 			var customer *paas.Customer
-			customer, err = paas.userManager.GetCustomer(customerIDOrEmail)
+			customer, err = paasCli.userManager.GetCustomer(customerIDOrEmail)
 			if err != nil {
-				customer, err = paas.userManager.GetCustomerByEmail(customerIDOrEmail)
+				customer, err = paasCli.userManager.GetCustomerByEmail(customerIDOrEmail)
 				if err != nil {
 					printError(fmt.Sprintf("Customer not found: %s", customerIDOrEmail))
 					return err
@@ -570,7 +570,7 @@ func newCustomerQuotaShowCmd() *cobra.Command {
 
 			// Create quota table
 			table := tablewriter.NewWriter(os.Stdout)
-			table.SetHeader([]string{"Resource", "Used", "Limit", "Usage %", "Status"})
+			table.Header([]string{"Resource", "Used", "Limit", "Usage %", "Status"})
 
 			resources := []struct {
 				name  string
@@ -632,7 +632,7 @@ func newCustomerQuotaUpdateCmd() *cobra.Command {
 		Example: `  superagent-cli customer quota update cust_12345 --cpu 4.0 --memory 8192
   superagent-cli customer quota update john@example.com --containers 20 --apps 10`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			paas, err := initializePaaS()
+			paasCli, err := initializePaaS()
 			if err != nil {
 				return err
 			}
@@ -641,9 +641,9 @@ func newCustomerQuotaUpdateCmd() *cobra.Command {
 
 			// Get customer
 			var customer *paas.Customer
-			customer, err = paas.userManager.GetCustomer(customerIDOrEmail)
+			customer, err = paasCli.userManager.GetCustomer(customerIDOrEmail)
 			if err != nil {
-				customer, err = paas.userManager.GetCustomerByEmail(customerIDOrEmail)
+				customer, err = paasCli.userManager.GetCustomerByEmail(customerIDOrEmail)
 				if err != nil {
 					printError(fmt.Sprintf("Customer not found: %s", customerIDOrEmail))
 					return err
@@ -751,7 +751,7 @@ func newCustomerLicenseListCmd() *cobra.Command {
 		Short: "List customer licenses",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			paas, err := initializePaaS()
+			paasCli, err := initializePaaS()
 			if err != nil {
 				return err
 			}
@@ -760,9 +760,9 @@ func newCustomerLicenseListCmd() *cobra.Command {
 
 			// Get customer
 			var customer *paas.Customer
-			customer, err = paas.userManager.GetCustomer(customerIDOrEmail)
+			customer, err = paasCli.userManager.GetCustomer(customerIDOrEmail)
 			if err != nil {
-				customer, err = paas.userManager.GetCustomerByEmail(customerIDOrEmail)
+				customer, err = paasCli.userManager.GetCustomerByEmail(customerIDOrEmail)
 				if err != nil {
 					printError(fmt.Sprintf("Customer not found: %s", customerIDOrEmail))
 					return err
@@ -777,7 +777,7 @@ func newCustomerLicenseListCmd() *cobra.Command {
 			}
 
 			table := tablewriter.NewWriter(os.Stdout)
-			table.SetHeader([]string{"License ID", "Status"})
+			table.Header([]string{"License ID", "Status"})
 
 			for _, licenseID := range customer.Licenses {
 				table.Append([]string{licenseID, "Active"})
@@ -798,7 +798,7 @@ func newCustomerLicenseAddCmd() *cobra.Command {
 		Short: "Add license to customer",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			paas, err := initializePaaS()
+			paasCli, err := initializePaaS()
 			if err != nil {
 				return err
 			}
@@ -808,9 +808,9 @@ func newCustomerLicenseAddCmd() *cobra.Command {
 
 			// Get customer
 			var customer *paas.Customer
-			customer, err = paas.userManager.GetCustomer(customerIDOrEmail)
+			customer, err = paasCli.userManager.GetCustomer(customerIDOrEmail)
 			if err != nil {
-				customer, err = paas.userManager.GetCustomerByEmail(customerIDOrEmail)
+				customer, err = paasCli.userManager.GetCustomerByEmail(customerIDOrEmail)
 				if err != nil {
 					printError(fmt.Sprintf("Customer not found: %s", customerIDOrEmail))
 					return err
@@ -818,7 +818,7 @@ func newCustomerLicenseAddCmd() *cobra.Command {
 			}
 
 			// Add license
-			err = paas.userManager.AddLicense(customer.ID, licenseID)
+			err = paasCli.userManager.AddLicense(customer.ID, licenseID)
 			if err != nil {
 				printError(fmt.Sprintf("Failed to add license: %v", err))
 				return err
@@ -839,7 +839,7 @@ func newCustomerLicenseRemoveCmd() *cobra.Command {
 		Short: "Remove license from customer",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			paas, err := initializePaaS()
+			paasCli, err := initializePaaS()
 			if err != nil {
 				return err
 			}
@@ -849,9 +849,9 @@ func newCustomerLicenseRemoveCmd() *cobra.Command {
 
 			// Get customer
 			var customer *paas.Customer
-			customer, err = paas.userManager.GetCustomer(customerIDOrEmail)
+			customer, err = paasCli.userManager.GetCustomer(customerIDOrEmail)
 			if err != nil {
-				customer, err = paas.userManager.GetCustomerByEmail(customerIDOrEmail)
+				customer, err = paasCli.userManager.GetCustomerByEmail(customerIDOrEmail)
 				if err != nil {
 					printError(fmt.Sprintf("Customer not found: %s", customerIDOrEmail))
 					return err
@@ -865,7 +865,7 @@ func newCustomerLicenseRemoveCmd() *cobra.Command {
 			}
 
 			// Remove license
-			err = paas.userManager.RemoveLicense(customer.ID, licenseID)
+			err = paasCli.userManager.RemoveLicense(customer.ID, licenseID)
 			if err != nil {
 				printError(fmt.Sprintf("Failed to remove license: %v", err))
 				return err

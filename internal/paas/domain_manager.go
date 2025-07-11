@@ -14,6 +14,7 @@ import (
 
 	"superagent/internal/storage"
 	"superagent/internal/logging"
+	"superagent/internal/config"
 
 	"github.com/sirupsen/logrus"
 )
@@ -29,29 +30,33 @@ type DomainManager struct {
 	baseDomain     string
 	dnsProvider    string
 	acmeEmail      string
+	config         *config.Config
 	mu             sync.RWMutex
 }
 
 // Domain represents a custom domain configuration
 type Domain struct {
-	ID              string                 `json:"id"`
-	Name            string                 `json:"name"`
-	CustomerID      string                 `json:"customer_id"`
-	DeploymentID    string                 `json:"deployment_id"`
-	Status          DomainStatus           `json:"status"`
-	Type            DomainType             `json:"type"`
-	DNSRecords      []DNSRecord            `json:"dns_records"`
-	SSLCertificate  *SSLCertificate        `json:"ssl_certificate,omitempty"`
-	Verification    DomainVerification     `json:"verification"`
-	TraefikRule     string                 `json:"traefik_rule"`
-	RedirectToHTTPS bool                   `json:"redirect_to_https"`
-	WWWRedirect     bool                   `json:"www_redirect"`
-	CDNEnabled      bool                   `json:"cdn_enabled"`
-	WAFEnabled      bool                   `json:"waf_enabled"`
-	CreatedAt       time.Time              `json:"created_at"`
-	UpdatedAt       time.Time              `json:"updated_at"`
-	ExpiresAt       *time.Time             `json:"expires_at,omitempty"`
-	Metadata        map[string]interface{} `json:"metadata"`
+	ID                 string                 `json:"id"`
+	Name               string                 `json:"name"`
+	CustomerID         string                 `json:"customer_id"`
+	DeploymentID       string                 `json:"deployment_id"`
+	Status             DomainStatus           `json:"status"`
+	Type               DomainType             `json:"type"`
+	DNSRecords         []DNSRecord            `json:"dns_records"`
+	SSLCertificate     *SSLCertificate        `json:"ssl_certificate,omitempty"`
+	Verification       DomainVerification     `json:"verification"`
+	TraefikRule        string                 `json:"traefik_rule"`
+	RedirectToHTTPS    bool                   `json:"redirect_to_https"`
+	WWWRedirect        bool                   `json:"www_redirect"`
+	CDNEnabled         bool                   `json:"cdn_enabled"`
+	WAFEnabled         bool                   `json:"waf_enabled"`
+	IsVerified         bool                   `json:"is_verified"`
+	VerificationToken  string                 `json:"verification_token"`
+	VerificationMethod string                 `json:"verification_method"`
+	CreatedAt          time.Time              `json:"created_at"`
+	UpdatedAt          time.Time              `json:"updated_at"`
+	ExpiresAt          *time.Time             `json:"expires_at,omitempty"`
+	Metadata           map[string]interface{} `json:"metadata"`
 }
 
 // Subdomain represents an auto-assigned subdomain
@@ -73,6 +78,7 @@ type Subdomain struct {
 type SSLCertificate struct {
 	ID              string                 `json:"id"`
 	Domain          string                 `json:"domain"`
+	DomainName      string                 `json:"domain_name"`
 	AlternateNames  []string               `json:"alternate_names"`
 	Provider        string                 `json:"provider"` // letsencrypt, custom, cloudflare
 	Status          CertificateStatus      `json:"status"`
@@ -82,6 +88,7 @@ type SSLCertificate struct {
 	CertificateData string                 `json:"certificate_data"`
 	PrivateKeyData  string                 `json:"private_key_data"`
 	Chain           []string               `json:"chain"`
+	ChainData       string                 `json:"chain_data"`
 	AutoRenew       bool                   `json:"auto_renew"`
 	CreatedAt       time.Time              `json:"created_at"`
 	UpdatedAt       time.Time              `json:"updated_at"`
@@ -98,6 +105,18 @@ const (
 	DomainStatusFailed     DomainStatus = "failed"
 	DomainStatusSuspended  DomainStatus = "suspended"
 	DomainStatusExpired    DomainStatus = "expired"
+)
+
+// SubdomainStatus represents subdomain status (alias for DomainStatus)
+type SubdomainStatus string
+
+const (
+	SubdomainStatusPending    SubdomainStatus = "pending"
+	SubdomainStatusActive     SubdomainStatus = "active"
+	SubdomainStatusVerifying  SubdomainStatus = "verifying"
+	SubdomainStatusFailed     SubdomainStatus = "failed"
+	SubdomainStatusSuspended  SubdomainStatus = "suspended"
+	SubdomainStatusExpired    SubdomainStatus = "expired"
 )
 
 // DomainType represents domain type
@@ -587,10 +606,11 @@ func (dm *DomainManager) getServerIP() string {
 		return publicIP
 	}
 	
-	// Fallback to configured IP from config
-	if dm.config != nil && dm.config.Server.PublicIP != "" {
-		return dm.config.Server.PublicIP
-	}
+	// Fallback to configured IP from config (placeholder)
+	// TODO: Add Server configuration to config.Config
+	// if dm.config != nil && dm.config.Server.PublicIP != "" {
+	//     return dm.config.Server.PublicIP
+	// }
 	
 	logrus.Warn("Unable to determine server IP, using localhost (this should be configured in production)")
 	return "127.0.0.1"
@@ -994,7 +1014,7 @@ func (dm *DomainManager) loadDomainsAndCerts() error {
 						subdomain.DeploymentID = deploymentID
 					}
 					if status, ok := subdomainMap["status"].(string); ok {
-						subdomain.Status = SubdomainStatus(status)
+						subdomain.Status = DomainStatus(status)
 					}
 					if region, ok := subdomainMap["region"].(string); ok {
 						subdomain.Region = region

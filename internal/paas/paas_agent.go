@@ -44,21 +44,28 @@ type PaaSAgent struct {
 
 // PaaSDeployment represents a PaaS deployment with enhanced metadata
 type PaaSDeployment struct {
-	ID           string                 `json:"id"`
-	CustomerID   string                 `json:"customer_id"`
-	AppID        string                 `json:"app_id"`
-	LicenseID    string                 `json:"license_id"`
-	Version      string                 `json:"version"`
-	Status       DeploymentStatus       `json:"status"`
-	Environment  map[string]string      `json:"environment"`
-	Resources    ResourceUsage          `json:"resources"`
-	Domains      []string               `json:"domains"`
-	Subdomains   []string               `json:"subdomains"`
-	HealthStatus HealthStatus           `json:"health_status"`
-	Metadata     map[string]interface{} `json:"metadata"`
-	CreatedAt    time.Time              `json:"created_at"`
-	UpdatedAt    time.Time              `json:"updated_at"`
-	LastChecked  time.Time              `json:"last_checked"`
+	ID              string                 `json:"id"`
+	Name            string                 `json:"name"`
+	CustomerID      string                 `json:"customer_id"`
+	AppID           string                 `json:"app_id"`
+	LicenseID       string                 `json:"license_id"`
+	Version         string                 `json:"version"`
+	Status          DeploymentStatus       `json:"status"`
+	Environment     map[string]string      `json:"environment"`
+	Resources       ResourceUsage          `json:"resources"`
+	Domains         []string               `json:"domains"`
+	Subdomains      []string               `json:"subdomains"`
+	SubdomainID     string                 `json:"subdomain_id"`
+	DomainID        string                 `json:"domain_id"`
+	HealthStatus    HealthStatus           `json:"health_status"`
+	HealthCheck     map[string]interface{} `json:"health_check,omitempty"`
+	LastHealthCheck *time.Time             `json:"last_health_check,omitempty"`
+	ContainerID     string                 `json:"container_id"`
+	Config          map[string]interface{} `json:"config,omitempty"`
+	Metadata        map[string]interface{} `json:"metadata"`
+	CreatedAt       time.Time              `json:"created_at"`
+	UpdatedAt       time.Time              `json:"updated_at"`
+	LastChecked     time.Time              `json:"last_checked"`
 }
 
 // DeploymentStatus represents deployment status
@@ -71,6 +78,7 @@ const (
 	DeploymentStatusStopped   DeploymentStatus = "stopped"
 	DeploymentStatusFailed    DeploymentStatus = "failed"
 	DeploymentStatusUpdating  DeploymentStatus = "updating"
+	DeploymentStatusDegraded  DeploymentStatus = "degraded"
 )
 
 // HealthStatus represents health check status
@@ -98,7 +106,7 @@ type PaaSDeploymentRequest struct {
 // NewPaaSAgent creates a new PaaS-enabled SuperAgent
 func NewPaaSAgent(cfg *config.Config, store *storage.SecureStore, auditLogger *logging.AuditLogger, monitor *monitoring.Monitor) (*PaaSAgent, error) {
 	// Create core agent
-	coreAgent, err := agent.NewAgent(cfg, store, auditLogger, monitor)
+	coreAgent, err := agent.New(cfg, auditLogger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create core agent: %w", err)
 	}
@@ -106,7 +114,7 @@ func NewPaaSAgent(cfg *config.Config, store *storage.SecureStore, auditLogger *l
 	// Create PaaS components
 	userManager := NewUserManager(store, auditLogger)
 	appCatalog := NewAppCatalog(store, auditLogger)
-	domainManager := NewDomainManager(store, auditLogger, cfg.Domain.BaseDomain, cfg.Domain.DNSProvider, cfg.Domain.ACMEEmail)
+	domainManager := NewDomainManager(store, auditLogger, "yourdomain.com", "cloudflare", "admin@yourdomain.com")
 
 	paasAgent := &PaaSAgent{
 		agent:         coreAgent,
@@ -161,7 +169,7 @@ func (pa *PaaSAgent) Stop(ctx context.Context) error {
 	close(pa.stopCh)
 
 	// Stop core agent
-	if err := pa.agent.Stop(ctx); err != nil {
+	if err := pa.agent.Shutdown(ctx); err != nil {
 		logrus.Errorf("Failed to stop core agent: %v", err)
 	}
 
@@ -802,16 +810,26 @@ func (pa *PaaSAgent) loadDeployments() error {
 
 					// Load resource configuration
 					if resourceData, ok := deploymentMap["resources"].(map[string]interface{}); ok {
-						resources := make(map[string]interface{})
+						resources := ResourceUsage{}
 						if cpuCores, ok := resourceData["cpu_cores"].(float64); ok {
-							resources["cpu_cores"] = cpuCores
+							resources.UsedCPU = cpuCores
 						}
 						if memoryMB, ok := resourceData["memory_mb"].(float64); ok {
-							resources["memory_mb"] = int(memoryMB)
+							resources.UsedMemory = int64(memoryMB)
 						}
 						if storageGB, ok := resourceData["storage_gb"].(float64); ok {
-							resources["storage_gb"] = int(storageGB)
+							resources.UsedStorage = int64(storageGB)
 						}
+						if activeContainers, ok := resourceData["active_containers"].(float64); ok {
+							resources.ActiveContainers = int(activeContainers)
+						}
+						if totalApps, ok := resourceData["total_apps"].(float64); ok {
+							resources.TotalApps = int(totalApps)
+						}
+						if totalDeployments, ok := resourceData["total_deployments"].(float64); ok {
+							resources.TotalDeployments = int(totalDeployments)
+						}
+						resources.LastUpdated = time.Now()
 						deployment.Resources = resources
 					}
 

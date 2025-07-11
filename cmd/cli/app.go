@@ -57,7 +57,7 @@ func newAppAddCmd() *cobra.Command {
 		Example: `  superagent-cli app add --name "E-commerce Store" --source-type git --git-url https://github.com/example/ecommerce
   superagent-cli app add --name "Node.js API" --source-type docker --docker-image node:16 --port 3000`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			paas, err := initializePaaS()
+			paasCli, err := initializePaaS()
 			if err != nil {
 				return err
 			}
@@ -238,7 +238,7 @@ func newAppAddCmd() *cobra.Command {
 			}
 
 			// Add application
-			app, err := paas.appCatalog.AddApplication(context.Background(), req)
+			app, err := paasCli.appCatalog.AddApplication(context.Background(), req)
 			if err != nil {
 				printError(fmt.Sprintf("Failed to add application: %v", err))
 				return err
@@ -298,12 +298,12 @@ func newAppListCmd() *cobra.Command {
   superagent-cli app list --category ecommerce
   superagent-cli app list --status active --type webapp`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			paas, err := initializePaaS()
+			paasCli, err := initializePaaS()
 			if err != nil {
 				return err
 			}
 
-			apps := paas.appCatalog.ListApplications()
+			apps := paasCli.appCatalog.ListApplications()
 
 			if len(apps) == 0 {
 				printInfo("No applications found in catalog")
@@ -327,7 +327,7 @@ func newAppListCmd() *cobra.Command {
 
 			// Create table
 			table := tablewriter.NewWriter(os.Stdout)
-			table.SetHeader([]string{"ID", "Name", "Category", "Type", "Publisher", "Status", "Version", "Downloads", "Created"})
+			table.Header([]string{"ID", "Name", "Category", "Type", "Publisher", "Status", "Version", "Downloads", "Created"})
 
 			for _, app := range filteredApps {
 				table.Append([]string{
@@ -366,7 +366,7 @@ func newAppShowCmd() *cobra.Command {
 		Example: `  superagent-cli app show app_12345
   superagent-cli app show "E-commerce Store"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			paas, err := initializePaaS()
+			paasCli, err := initializePaaS()
 			if err != nil {
 				return err
 			}
@@ -375,9 +375,9 @@ func newAppShowCmd() *cobra.Command {
 
 			// Try to get by ID first, then by name
 			var app *paas.Application
-			app, err = paas.appCatalog.GetApplication(appIDOrName)
+			app, err = paasCli.appCatalog.GetApplication(appIDOrName)
 			if err != nil {
-				app, err = paas.appCatalog.GetApplicationByName(appIDOrName)
+				app, err = paasCli.appCatalog.GetApplicationByName(appIDOrName)
 				if err != nil {
 					printError(fmt.Sprintf("Application not found: %s", appIDOrName))
 					return err
@@ -507,7 +507,7 @@ func newAppVersionAddCmd() *cobra.Command {
 		Example: `  superagent-cli app version add app_12345 --version 1.1.0 --description "Bug fixes"
   superagent-cli app version add "My App" --version 2.0.0 --breaking --changelog "Major update"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			paas, err := initializePaaS()
+			paasCli, err := initializePaaS()
 			if err != nil {
 				return err
 			}
@@ -516,9 +516,9 @@ func newAppVersionAddCmd() *cobra.Command {
 
 			// Get application
 			var app *paas.Application
-			app, err = paas.appCatalog.GetApplication(appIDOrName)
+			app, err = paasCli.appCatalog.GetApplication(appIDOrName)
 			if err != nil {
-				app, err = paas.appCatalog.GetApplicationByName(appIDOrName)
+				app, err = paasCli.appCatalog.GetApplicationByName(appIDOrName)
 				if err != nil {
 					printError(fmt.Sprintf("Application not found: %s", appIDOrName))
 					return err
@@ -549,7 +549,7 @@ func newAppVersionAddCmd() *cobra.Command {
 			}
 
 			// Create version source based on app source type
-			versionSource := app.Source
+			versionSource := *app.Source
 			if app.Source.Type == paas.SourceTypeGit && gitTag != "" {
 				versionSource.Repository.Tag = gitTag
 			}
@@ -573,7 +573,7 @@ func newAppVersionAddCmd() *cobra.Command {
 			}
 
 			// Add version
-			err = paas.appCatalog.AddVersion(app.ID, newVersion)
+			err = paasCli.appCatalog.AddVersion(app.ID, newVersion)
 			if err != nil {
 				printError(fmt.Sprintf("Failed to add version: %v", err))
 				return err
@@ -602,7 +602,7 @@ func newAppVersionListCmd() *cobra.Command {
 		Short: "List all versions of an application",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			paas, err := initializePaaS()
+			paasCli, err := initializePaaS()
 			if err != nil {
 				return err
 			}
@@ -611,9 +611,9 @@ func newAppVersionListCmd() *cobra.Command {
 
 			// Get application
 			var app *paas.Application
-			app, err = paas.appCatalog.GetApplication(appIDOrName)
+			app, err = paasCli.appCatalog.GetApplication(appIDOrName)
 			if err != nil {
-				app, err = paas.appCatalog.GetApplicationByName(appIDOrName)
+				app, err = paasCli.appCatalog.GetApplicationByName(appIDOrName)
 				if err != nil {
 					printError(fmt.Sprintf("Application not found: %s", appIDOrName))
 					return err
@@ -628,7 +628,7 @@ func newAppVersionListCmd() *cobra.Command {
 			}
 
 			table := tablewriter.NewWriter(os.Stdout)
-			table.SetHeader([]string{"Version", "Status", "Release Date", "Downloads", "Breaking", "Security", "Description"})
+			table.Header([]string{"Version", "Status", "Release Date", "Downloads", "Breaking", "Security", "Description"})
 
 			for _, version := range app.Versions {
 				latest := ""

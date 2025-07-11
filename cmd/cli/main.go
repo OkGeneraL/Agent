@@ -1,14 +1,12 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"superagent/internal/agent"
-	"superagent/internal/auth"
 	"superagent/internal/config"
 	"superagent/internal/logging"
 	"superagent/internal/monitoring"
@@ -70,12 +68,13 @@ This CLI allows you to:
 	rootCmd.AddCommand(
 		newCustomerCmd(),
 		newAppCmd(),
-		newLicenseCmd(),
-		newDeployCmd(),
-		newDomainCmd(),
-		newMonitorCmd(),
-		newServerCmd(),
-		newSetupCmd(),
+		// TODO: Implement these commands
+		// newLicenseCmd(),
+		// newDeployCmd(),
+		// newDomainCmd(),
+		// newMonitorCmd(),
+		// newServerCmd(),
+		// newSetupCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {
@@ -128,28 +127,25 @@ func initConfig() {
 
 func initializePaaS() (*PaaSCLI, error) {
 	// Load configuration
-	cfg, err := config.LoadConfig("")
+	cfg, err := config.Load("")
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Initialize storage
-	store, err := storage.NewSecureStore(cfg.Storage.EncryptionKey, cfg.Storage.DataDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize storage: %w", err)
-	}
-
-	// Initialize audit logger
+	// Initialize audit logger first (needed for storage)
 	auditLogger, err := logging.NewAuditLogger(cfg.Logging.AuditFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize audit logger: %w", err)
 	}
 
-	// Initialize monitor
-	monitor, err := monitoring.NewMonitor(cfg.Monitoring.MetricsPort, cfg.Monitoring.PrometheusEnabled)
+	// Initialize storage
+	store, err := storage.NewSecureStore(cfg.Storage.DataDir, cfg.Storage.EncryptionKey, auditLogger)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize monitor: %w", err)
+		return nil, fmt.Errorf("failed to initialize storage: %w", err)
 	}
+
+	// Initialize monitor
+	monitor := monitoring.NewMonitor(auditLogger, cfg.Monitoring.MetricsPort)
 
 	// Initialize PaaS components
 	userManager := paas.NewUserManager(store, auditLogger)
@@ -157,7 +153,7 @@ func initializePaaS() (*PaaSCLI, error) {
 	domainManager := paas.NewDomainManager(store, auditLogger, cfg.Domain.BaseDomain, cfg.Domain.DNSProvider, cfg.Domain.ACMEEmail)
 
 	// Initialize agent
-	agentInstance, err := agent.NewAgent(cfg, store, auditLogger, monitor)
+	agentInstance, err := agent.New(cfg, auditLogger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize agent: %w", err)
 	}

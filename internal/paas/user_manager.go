@@ -656,66 +656,77 @@ func (um *UserManager) loadUsers() error {
 
 					// Load resource quotas
 					if quotasData, ok := customerMap["resource_quotas"].(map[string]interface{}); ok {
-						quotas := &ResourceQuotas{}
-						if cpuCores, ok := quotasData["cpu_cores"].(float64); ok {
-							quotas.CPUCores = int(cpuCores)
+						quotas := ResourceQuotas{}
+						if maxCPU, ok := quotasData["max_cpu"].(float64); ok {
+							quotas.MaxCPU = maxCPU
 						}
-						if memoryGB, ok := quotasData["memory_gb"].(float64); ok {
-							quotas.MemoryGB = int(memoryGB)
+						if maxMemory, ok := quotasData["max_memory"].(float64); ok {
+							quotas.MaxMemory = int64(maxMemory)
 						}
-						if storageGB, ok := quotasData["storage_gb"].(float64); ok {
-							quotas.StorageGB = int(storageGB)
+						if maxStorage, ok := quotasData["max_storage"].(float64); ok {
+							quotas.MaxStorage = int64(maxStorage)
 						}
-						if bandwidthGB, ok := quotasData["bandwidth_gb"].(float64); ok {
-							quotas.BandwidthGB = int(bandwidthGB)
+						if maxBandwidth, ok := quotasData["max_bandwidth"].(float64); ok {
+							quotas.MaxBandwidth = int64(maxBandwidth)
 						}
-						if containers, ok := quotasData["containers"].(float64); ok {
-							quotas.Containers = int(containers)
+						if maxContainers, ok := quotasData["max_containers"].(float64); ok {
+							quotas.MaxContainers = int(maxContainers)
 						}
-						if applications, ok := quotasData["applications"].(float64); ok {
-							quotas.Applications = int(applications)
+						if maxApps, ok := quotasData["max_apps"].(float64); ok {
+							quotas.MaxApps = int(maxApps)
 						}
-						if domains, ok := quotasData["domains"].(float64); ok {
-							quotas.Domains = int(domains)
+						if maxDeployments, ok := quotasData["max_deployments"].(float64); ok {
+							quotas.MaxDeployments = int(maxDeployments)
+						}
+						if maxCustomDomains, ok := quotasData["max_custom_domains"].(float64); ok {
+							quotas.MaxCustomDomains = int(maxCustomDomains)
 						}
 						customer.ResourceQuotas = quotas
 					}
 
 					// Load resource usage
-					if usageData, ok := customerMap["resource_usage"].(map[string]interface{}); ok {
-						usage := &ResourceUsage{}
-						if cpuCores, ok := usageData["cpu_cores"].(float64); ok {
-							usage.CPUCores = cpuCores
+					if usageData, ok := customerMap["used_resources"].(map[string]interface{}); ok {
+						usage := ResourceUsage{}
+						if usedCPU, ok := usageData["used_cpu"].(float64); ok {
+							usage.UsedCPU = usedCPU
 						}
-						if memoryGB, ok := usageData["memory_gb"].(float64); ok {
-							usage.MemoryGB = memoryGB
+						if usedMemory, ok := usageData["used_memory"].(float64); ok {
+							usage.UsedMemory = int64(usedMemory)
 						}
-						if storageGB, ok := usageData["storage_gb"].(float64); ok {
-							usage.StorageGB = storageGB
+						if usedStorage, ok := usageData["used_storage"].(float64); ok {
+							usage.UsedStorage = int64(usedStorage)
 						}
-						if bandwidthGB, ok := usageData["bandwidth_gb"].(float64); ok {
-							usage.BandwidthGB = bandwidthGB
+						if usedBandwidth, ok := usageData["used_bandwidth"].(float64); ok {
+							usage.UsedBandwidth = int64(usedBandwidth)
 						}
-						if containers, ok := usageData["containers"].(float64); ok {
-							usage.Containers = int(containers)
+						if activeContainers, ok := usageData["active_containers"].(float64); ok {
+							usage.ActiveContainers = int(activeContainers)
 						}
-						if applications, ok := usageData["applications"].(float64); ok {
-							usage.Applications = int(applications)
+						if totalApps, ok := usageData["total_apps"].(float64); ok {
+							usage.TotalApps = int(totalApps)
 						}
-						if domains, ok := usageData["domains"].(float64); ok {
-							usage.Domains = int(domains)
+						if totalDeployments, ok := usageData["total_deployments"].(float64); ok {
+							usage.TotalDeployments = int(totalDeployments)
 						}
-						customer.ResourceUsage = usage
+						if customDomains, ok := usageData["custom_domains"].(float64); ok {
+							usage.CustomDomains = int(customDomains)
+						}
+						if lastUpdated, ok := usageData["last_updated"].(string); ok {
+							if t, err := time.Parse(time.RFC3339, lastUpdated); err == nil {
+								usage.LastUpdated = t
+							}
+						}
+						customer.UsedResources = usage
 					}
 
 					// Store in memory
-					um.customers[customerID] = customer
+					um.users[customerID] = customer
 					logrus.Debugf("Loaded customer: %s (%s)", customer.Name, customer.Email)
 				}
 			}
 		}
 	}
 
-	logrus.Infof("Successfully loaded %d customers from storage", len(um.customers))
+	logrus.Infof("Successfully loaded %d customers from storage", len(um.users))
 	return nil
 }

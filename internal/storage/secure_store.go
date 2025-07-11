@@ -497,6 +497,14 @@ func (s *SecureStore) decrypt(encryptedDataHex string, nonceHex string) ([]byte,
 	return plaintext, nil
 }
 
+// LoadData loads all stored data (public method)
+func (s *SecureStore) LoadData() (*StoredData, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	
+	return s.loadData()
+}
+
 // calculateChecksum calculates SHA256 checksum of data
 func (s *SecureStore) calculateChecksum(data map[string]interface{}) string {
 	// Convert to JSON for consistent hashing

@@ -32,13 +32,15 @@ type Application struct {
 	Category        string                 `json:"category"`
 	Tags            []string               `json:"tags"`
 	Publisher       string                 `json:"publisher"`
-	Status          AppStatus              `json:"status"`
+	PublisherID     string                 `json:"publisher_id"`
+	PublisherName   string                 `json:"publisher_name"`
+	Status          ApplicationStatus      `json:"status"`
 	Type            ApplicationType        `json:"type"`
-	Source          ApplicationSource      `json:"source"`
+	Source          *ApplicationSource     `json:"source"`
 	Versions        []*AppVersion          `json:"versions"`
 	LatestVersion   string                 `json:"latest_version"`
 	DefaultConfig   ApplicationConfig      `json:"default_config"`
-	Pricing         PricingInfo            `json:"pricing"`
+	Pricing         *PricingInfo           `json:"pricing"`
 	Requirements    SystemRequirements     `json:"requirements"`
 	Features        []string               `json:"features"`
 	Screenshots     []string               `json:"screenshots"`
@@ -78,6 +80,17 @@ const (
 	AppStatusDisabled   AppStatus = "disabled"
 )
 
+// ApplicationStatus represents application status (alias for AppStatus)
+type ApplicationStatus string
+
+const (
+	ApplicationStatusActive     ApplicationStatus = "active"
+	ApplicationStatusDeprecated ApplicationStatus = "deprecated"
+	ApplicationStatusBeta       ApplicationStatus = "beta"
+	ApplicationStatusAlpha      ApplicationStatus = "alpha"
+	ApplicationStatusDisabled   ApplicationStatus = "disabled"
+)
+
 // ApplicationSource defines where the application code/image comes from
 type ApplicationSource struct {
 	Type         SourceType            `json:"type"`
@@ -85,6 +98,11 @@ type ApplicationSource struct {
 	DockerImage  *DockerImageSource    `json:"docker_image,omitempty"`
 	Archive      *ArchiveSource        `json:"archive,omitempty"`
 	Credentials  map[string]string     `json:"credentials,omitempty"`
+	// Legacy fields for backward compatibility
+	GitURL       string                `json:"git_url,omitempty"`
+	GitBranch    string                `json:"git_branch,omitempty"`
+	DockerTag    string                `json:"docker_tag,omitempty"`
+	ArchiveURL   string                `json:"archive_url,omitempty"`
 }
 
 // SourceType defines the source type
@@ -270,13 +288,27 @@ type ScalingConfig struct {
 	} `json:"manual"`
 }
 
+// PricingModel defines pricing model types
+type PricingModel string
+
+const (
+	PricingModelFree         PricingModel = "free"
+	PricingModelOneTime      PricingModel = "one-time"
+	PricingModelSubscription PricingModel = "subscription"
+	PricingModelTrial        PricingModel = "trial"
+	PricingModelEnterprise   PricingModel = "enterprise"
+)
+
 // PricingInfo defines pricing information
 type PricingInfo struct {
-	Model    string             `json:"model"` // free, one-time, subscription
-	Currency string             `json:"currency"`
-	Tiers    []PricingTier      `json:"tiers"`
-	Trial    *TrialInfo         `json:"trial,omitempty"`
-	Metadata map[string]interface{} `json:"metadata"`
+	Model        string             `json:"model"` // free, one-time, subscription
+	Price        float64            `json:"price"`
+	Currency     string             `json:"currency"`
+	BillingCycle string             `json:"billing_cycle"`
+	TrialDays    int                `json:"trial_days"`
+	Tiers        []PricingTier      `json:"tiers"`
+	Trial        *TrialInfo         `json:"trial,omitempty"`
+	Metadata     map[string]interface{} `json:"metadata"`
 }
 
 // PricingTier represents a pricing tier
@@ -317,6 +349,8 @@ type AppLicense struct {
 	Status      LicenseStatus          `json:"status"`
 	ValidFrom   time.Time              `json:"valid_from"`
 	ValidUntil  *time.Time             `json:"valid_until,omitempty"`
+	IssuedAt    time.Time              `json:"issued_at"`
+	ExpiresAt   *time.Time             `json:"expires_at,omitempty"`
 	Limitations LicenseLimitations     `json:"limitations"`
 	Features    []string               `json:"features"`
 	PurchaseInfo PurchaseInfo          `json:"purchase_info"`
@@ -455,13 +489,13 @@ func (ac *AppCatalog) AddApplication(ctx context.Context, req *CreateApplication
 		Category:        req.Category,
 		Tags:            req.Tags,
 		Publisher:       req.Publisher,
-		Status:          AppStatusActive,
+		Status:          ApplicationStatusActive,
 		Type:            req.Type,
-		Source:          req.Source,
+		Source:          &req.Source,
 		Versions:        []*AppVersion{initialVersion},
 		LatestVersion:   "1.0.0",
 		DefaultConfig:   req.DefaultConfig,
-		Pricing:         req.Pricing,
+		Pricing:         &req.Pricing,
 		Requirements:    req.Requirements,
 		Features:        req.Features,
 		Documentation:   req.Documentation,
@@ -818,7 +852,9 @@ func (ac *AppCatalog) loadAppsAndLicenses() error {
 							source.GitBranch = gitBranch
 						}
 						if dockerImage, ok := sourceData["docker_image"].(string); ok {
-							source.DockerImage = dockerImage
+							source.DockerImage = &DockerImageSource{
+								Image: dockerImage,
+							}
 						}
 						if dockerTag, ok := sourceData["docker_tag"].(string); ok {
 							source.DockerTag = dockerTag
@@ -830,7 +866,7 @@ func (ac *AppCatalog) loadAppsAndLicenses() error {
 					if pricingData, ok := appMap["pricing"].(map[string]interface{}); ok {
 						pricing := &PricingInfo{}
 						if model, ok := pricingData["model"].(string); ok {
-							pricing.Model = PricingModel(model)
+							pricing.Model = model
 						}
 						if price, ok := pricingData["price"].(float64); ok {
 							pricing.Price = price
@@ -866,7 +902,7 @@ func (ac *AppCatalog) loadAppsAndLicenses() error {
 					}
 
 					// Store in memory
-					ac.applications[appID] = app
+					ac.apps[appID] = app
 					logrus.Debugf("Loaded application: %s (%s)", app.Name, app.Category)
 				}
 			}
@@ -916,6 +952,6 @@ func (ac *AppCatalog) loadAppsAndLicenses() error {
 	}
 
 	logrus.Infof("Successfully loaded %d applications and %d licenses from storage", 
-		len(ac.applications), len(ac.licenses))
+		len(ac.apps), len(ac.licenses))
 	return nil
 }
