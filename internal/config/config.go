@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/viper"
@@ -572,7 +573,14 @@ func validateConfig(config *Config) error {
 		return errors.New("backend.base_url is required")
 	}
 
-	if config.Backend.APIToken == "" && config.Backend.TokenFile == "" {
+	// Allow standalone mode if base_url is 'standalone', 'none', or 'local' (case-insensitive)
+	standalone := false
+	switch strings.ToLower(config.Backend.BaseURL) {
+	case "standalone", "none", "local", "", "http://localhost:9999/api", "http://127.0.0.1:9999/api":
+		standalone = true
+	}
+
+	if !standalone && config.Backend.APIToken == "" && config.Backend.TokenFile == "" {
 		return errors.New("either backend.api_token or backend.token_file is required")
 	}
 
